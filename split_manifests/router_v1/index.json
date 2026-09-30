@@ -1,0 +1,105 @@
+{
+  "primary_seed": 42,
+  "protocol": "router_v1",
+  "robustness_seeds": [
+    123,
+    2027,
+    3407,
+    8888
+  ],
+  "sources": [
+    {
+      "name": "abs",
+      "path": "abs.jsonl",
+      "rows": 1800,
+      "sha256": "49f603f24e0a4283e8e7c2ce2c37300eb3ab62fbd1a11e411bf8af49b5e79e56"
+    },
+    {
+      "name": "code",
+      "path": "code.jsonl",
+      "rows": 588,
+      "sha256": "c2db35d05d8ca45a54d4f68ce83ad7ef88a38ef788e419d2e08c1007b527ae87"
+    },
+    {
+      "name": "math",
+      "path": "math.jsonl",
+      "rows": 1800,
+      "sha256": "0ac04789b13c1473a19ed8aa78d4a2ec27c86c9cb5c7fcaa3866a728d6825c82"
+    },
+    {
+      "name": "qa",
+      "path": "qa.jsonl",
+      "rows": 1800,
+      "sha256": "ecffd4b487426dfe52ccadddded1c1540d35becc5df79c85b8f675874c890010"
+    }
+  ],
+  "split_spec": {
+    "abstain": {
+      "test": 180,
+      "train": 1440,
+      "val": 180
+    },
+    "code": {
+      "test": 60,
+      "train": 468,
+      "val": 60
+    },
+    "math": {
+      "test": 180,
+      "train": 1440,
+      "val": 180
+    },
+    "qa": {
+      "test": 180,
+      "train": 1440,
+      "val": 180
+    }
+  },
+  "variants": [
+    {
+      "assignment_sha256": "b8eb25781c712c06ecd7d90e2b98c3570a5a3096bae43eb4ada96521743a2ccc",
+      "rows_by_split": {
+        "test": 600,
+        "train": 4788,
+        "val": 600
+      },
+      "seed": 42
+    },
+    {
+      "assignment_sha256": "bfe9caf29dce8af761d6a7c326b4a2412b680b536df5770ba9dbf8445197ac05",
+      "rows_by_split": {
+        "test": 600,
+        "train": 4788,
+        "val": 600
+      },
+      "seed": 123
+    },
+    {
+      "assignment_sha256": "a8914198e8d07308323c3135135ded3769370c198cfb91fd20cf318ba7031b61",
+      "rows_by_split": {
+        "test": 600,
+        "train": 4788,
+        "val": 600
+      },
+      "seed": 2027
+    },
+    {
+      "assignment_sha256": "edc995cf36e7ff315855c7b34b7be458c6a918ca27eeff4c9d61774cb75adaa4",
+      "rows_by_split": {
+        "test": 600,
+        "train": 4788,
+        "val": 600
+      },
+      "seed": 3407
+    },
+    {
+      "assignment_sha256": "5f617048e9e0ac1cde55436cc8919e2a4cfff097a6e7e43cd76f26c576ef4ff8",
+      "rows_by_split": {
+        "test": 600,
+        "train": 4788,
+        "val": 600
+      },
+      "seed": 8888
+    }
+  ]
+}
