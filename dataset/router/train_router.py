@@ -23,7 +23,9 @@ train_router.py
 import json
 import os
 import argparse
+import sys
 from collections import Counter
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -38,6 +40,11 @@ from datasets import Dataset
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from split_protocol import validate_materialized_splits
 
 # 固定标签顺序(与 prepare_router_data.py 的 LABEL_INDEX 对应)
 LABELS = ["abstain", "code", "math", "qa"]
@@ -53,15 +60,27 @@ def load_data(path):
         line = line.strip()
         if line:
             d = json.loads(line)
-            rows.append({"text": d["text"], "label": d["label_id"]})
+            rows.append(
+                {
+                    "text": d["text"],
+                    "label": d["label_id"],
+                    "sample_id": d.get("sample_id"),
+                    "group_id": d.get("group_id"),
+                }
+            )
     return rows
 
 
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--model_path", default="/root/autodl-tmp/lrr/ParamAgent/models/deberta-v3-base")
-    p.add_argument("--output_dir", default=os.path.join(HERE, "router_model_output"))
-    p.add_argument("--data_dir", default=HERE)
+    p.add_argument("--output_dir", default=None)
+    p.add_argument(
+        "--data_dir",
+        default=None,
+        help="固定划分目录；默认 dataset/router/splits/router_v1/seed_<split_seed>",
+    )
+    p.add_argument("--split_seed", type=int, default=42, help="数据划分种子，与训练随机种子分开")
     p.add_argument("--batch_size", type=int, default=16)
     p.add_argument("--eval_batch_size", type=int, default=32)
     p.add_argument("--lr", type=float, default=2e-5)
@@ -97,6 +116,17 @@ def compute_metrics(eval_pred):
 
 def main():
     args = parse_args()
+
+    if args.data_dir is None:
+        args.data_dir = os.path.join(HERE, "splits", "router_v1", f"seed_{args.split_seed}")
+    if args.output_dir is None:
+        args.output_dir = os.path.join(HERE, "router_model_output", f"split_seed_{args.split_seed}")
+    split_validation = validate_materialized_splits(args.data_dir)
+    if split_validation["seed"] != args.split_seed:
+        raise ValueError(
+            f"--split_seed={args.split_seed} 与 manifest seed={split_validation['seed']} 不一致"
+        )
+    print("固定数据划分校验通过:", split_validation)
 
     train_rows = load_data(os.path.join(args.data_dir, "router_train.jsonl"))
     val_rows = load_data(os.path.join(args.data_dir, "router_val.jsonl"))

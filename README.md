@@ -33,6 +33,9 @@ workflow.
 
 For the detailed guide, see [HowToUse.md](HowToUse.md).
 
+For the frozen, leakage-resistant multi-seed train/validation/test protocol, see
+[`docs/data_split_protocol.md`](docs/data_split_protocol.md).
+
 ## Setup
 
 Run all commands from the repository root:
@@ -208,7 +211,6 @@ generators/    Shared model and prompt-generation utilities
 executors/     Shared execution/evaluation utilities
 HowToUse.md    Detailed step-by-step usage guide
 ```
-
 
 
 
