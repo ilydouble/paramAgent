@@ -1,0 +1,11 @@
+# Qwen3.5 support requires the current Transformers main branch (not the
+# repository's legacy datasets==2.7.0 environment alone).
+git+https://github.com/huggingface/transformers.git@main
+accelerate>=1.5.0
+peft>=0.15.0
+bitsandbytes>=0.45.0
+datasets>=3.0.0
+torchvision
+pillow
+together
+dashscope
