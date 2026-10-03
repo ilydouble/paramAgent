@@ -1,0 +1,53 @@
+# EXAMPLE ONLY: replace prepared-data paths, model dependencies and revisions.
+# 8001/8002/8003 preference endpoints are NOT deployed by this configuration.
+version: router_experiment_v1
+purpose: pilot
+tasks_path: dataset/gain_router/prepared/online_tasks.jsonl
+split_manifest: split_manifests/gain_router_v1/seed42/manifest.json
+split: train
+output_dir: outputs/router_call_v1/pilot_seed42
+seed: 42000
+max_per_domain: 10
+policy_version: preference_repair_single_v1
+request_timeout: 180
+retries: 2
+actor:
+  endpoint: http://127.0.0.1:8000/v1
+  model_id: Qwen3.5-4B
+  revision: REPLACE_WITH_VERIFIED_REVISION
+  weights_path: /root/autodl-tmp/lrr/models/Qwen3.5-4B
+  temperature: 0.2
+  max_tokens: 4096
+  top_p: 0.9
+  enable_thinking: false
+preference_models:
+  code:
+    endpoint: http://127.0.0.1:8001/v1
+    model_id: preference-code
+    revision: REPLACE_WITH_VERIFIED_REVISION
+    weights_path: models/Qwen3.5-2B-code-merged3
+    adapter_path: lora-qwen3.5-2b-dpo/lora-qwen3.5-2b-code-dpo30
+    temperature: 0.4
+    max_tokens: 2048
+  math:
+    endpoint: http://127.0.0.1:8002/v1
+    model_id: preference-math
+    revision: REPLACE_WITH_VERIFIED_REVISION
+    weights_path: models/Qwen3.5-2B-math-merged2
+    adapter_path: lora-qwen3.5-2b-dpo/lora-qwen3.5-2b-math-dpo
+    temperature: 0.4
+    max_tokens: 2048
+  qa:
+    endpoint: http://127.0.0.1:8003/v1
+    model_id: preference-qa
+    revision: REPLACE_WITH_VERIFIED_REVISION
+    weights_path: models/Qwen3.5-2B-qa-merged
+    adapter_path: lora-qwen3.5-2b-dpo/lora-qwen3.5-2b-qa-dpo
+    temperature: 0.4
+    max_tokens: 2048
+# Not a frozen paper objective; zero costs are an explicit diagnostic choice.
+labels:
+  version: binary_success_net_gain_v1
+  verifier_version: legacy_deterministic_v1
+  lambda_tokens: 0.0
+  lambda_latency: 0.0

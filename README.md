@@ -36,6 +36,15 @@ For the detailed guide, see [HowToUse.md](HowToUse.md).
 For the frozen, leakage-resistant multi-seed train/validation/test protocol, see
 [`docs/data_split_protocol.md`](docs/data_split_protocol.md).
 
+For router-data modules, durable per-call trajectories, and read-only quality
+audits, see [`docs/gain_router_code_guide.md`](docs/gain_router_code_guide.md).
+The existing G/D generator is a legacy diagnostic pilot, not the final binary
+call/no-call protocol; model calls require explicit `--allow-legacy-pilot`.
+The new call/no-call pilot uses `configs/router_data_pilot.yaml` and separate
+`collect_router_traces.py`, `build_router_labels.py`, and `export_router_features.py`
+commands. Collection defaults to a read-only dry run; model calls require
+`--execute`. Example model/data dependencies are not deployed or certified.
+
 ## Setup
 
 Run all commands from the repository root:
@@ -211,6 +220,4 @@ generators/    Shared model and prompt-generation utilities
 executors/     Shared execution/evaluation utilities
 HowToUse.md    Detailed step-by-step usage guide
 ```
-
-
 

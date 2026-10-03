@@ -1,0 +1,2 @@
+# CPU-side schema/config/trajectory tooling; model serving is a separate env.
+PyYAML>=6.0,<7.0
