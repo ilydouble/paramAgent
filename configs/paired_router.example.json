@@ -1,0 +1,46 @@
+{
+  "rounds": 2,
+  "seed": 42,
+  "max_per_domain": 1,
+  "split": "train",
+  "actor": {
+    "endpoint": "http://127.0.0.1:8000/v1",
+    "model_id": "Qwen3.5-4B",
+    "revision": "REPLACE_VERIFIED_ACTOR_REVISION",
+    "temperature": 0.2,
+    "max_tokens": 4096,
+    "enable_thinking": false
+  },
+  "preference_models": {
+    "code": {
+      "endpoint": "http://127.0.0.1:8001/v1",
+      "model_id": "preference-code2",
+      "revision": "REPLACE_WITH_sha256_ADAPTER_HASH",
+      "temperature": 0.4,
+      "max_tokens": 3072,
+      "weights_path": "/root/autodl-tmp/lrr/ParamAgent/models/Qwen3.5-2B-code-merged2",
+      "adapter_path": "/root/autodl-tmp/lrr/ParamAgent/lora-qwen3.5-2b-dpo/lora-qwen3.5-2b-code2-dpo-20261003",
+      "enable_thinking": false
+    },
+    "math": {
+      "endpoint": "http://127.0.0.1:8002/v1",
+      "model_id": "preference-math",
+      "revision": "REPLACE_WITH_sha256_ADAPTER_HASH",
+      "temperature": 0.4,
+      "max_tokens": 3072,
+      "weights_path": "/root/autodl-tmp/lrr/ParamAgent/models/Qwen3.5-2B-math-merged2",
+      "adapter_path": "/root/autodl-tmp/lrr/ParamAgent/lora-qwen3.5-2b-dpo/lora-qwen3.5-2b-math-dpo3",
+      "enable_thinking": false
+    },
+    "qa": {
+      "endpoint": "http://127.0.0.1:8003/v1",
+      "model_id": "preference-qa",
+      "revision": "REPLACE_WITH_sha256_ADAPTER_HASH",
+      "temperature": 0.4,
+      "max_tokens": 3072,
+      "weights_path": "/root/autodl-tmp/lrr/ParamAgent/models/Qwen3.5-2B-qa-merged",
+      "adapter_path": "/root/autodl-tmp/lrr/ParamAgent/lora-qwen3.5-2b-dpo/lora-qwen3.5-2b-qa-dpo3",
+      "enable_thinking": false
+    }
+  }
+}
