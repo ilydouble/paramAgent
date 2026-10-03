@@ -14,6 +14,28 @@
 每题总计11次4B调用、5次2B调用，共16次。先每域1题、2轮检查流程，再每域100题、5轮估计正负比例、截断率与成本。
 正式数量根据这批数据的收益分布决定，不必先跑完整个训练池。
 
+2026-10-04 用户选择直接全量采集。服务器已准备目录
+`/root/autodl-tmp/lrr/router-paired-full-20261004`，其中 `pool/` 保存重新生成的全量题池，
+`settings-train.json` 和 `settings-val.json` 都设置5轮，不限制领域题量。
+CODE为3153/365题、MATH为5717/614题、QA为17220/1946题（train/val），合计29015题、464240次模型调用。
+启动器 `scripts/run_full_paired_router.py` 默认仅预检查，添加 `--execute` 才生成。
+服务器预检查退出码0，确认全量选择、adapter哈希、SFT目录、4B健康及16384上下文上限。
+
+```bash
+cd /root/autodl-tmp/lrr/ParamAgent
+screen -S router-full
+/root/autodl-tmp/lrr/code2-merge-env/bin/python -u scripts/run_full_paired_router.py --execute
+```
+
+使用Ctrl+A、D脱离screen，重新连接用 `screen -r router-full`。
+启动器顺序采集全量train和val，再离线评分；生成不读取标准答案。
+各阶段日志位于输出目录的 `collect-train.log`、`collect-val.log`、`label-train.log`、`label-val.log`，
+当前阶段保存在 `launcher-status.json`，完整轨迹在 `run-train/` 和 `run-val/`。
+中断后同一命令重跑会复用已保存调用；不要修改运行配置或核心采集代码。
+多合法答案等无法确认的MATH样本保留轨迹并排除标签，不能强行标0。
+当前数据盘余量约19GiB，不能保证容纳全量轨迹；启动器每30秒检查磁盘，低于2GiB余量停止。
+若触发磁盘停止，先增加空间，保留所有已有文件，再续跑；中断恰逢JSONL写入时可能需要显式尾部恢复。
+
 ## 输入与划分
 
 `prepare` 从现有 Code/Math/QA 训练源重建可评分题池，保留与 SFT/DPO 的重合。
