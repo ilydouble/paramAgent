@@ -5,12 +5,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 export PYTHONPATH=.
+SPLIT_SEED=${SPLIT_SEED:-42}
+SPLIT_MANIFEST=${SPLIT_MANIFEST:-split_manifests/router_v1/seed_${SPLIT_SEED}.json}
 export CUDA_VISIBLE_DEVICES=0
 export TOKENIZERS_PARALLELISM=false
 
 python qa/LoRA_Qwen35_QA_4090.py \
   --dataset_path dataset/multihop/train/sft.jsonl \
-  --output_dir ./lora-qwen3.5-2b/lora-qwen3.5-2b-qa \
+  --output_dir "./lora-qwen3.5-2b/qa-sft-seed${SPLIT_SEED}" \
   --base_model ./models/Qwen3.5-2B \
   --num_epochs 2 \
   --per_device_batch_size 2 \
@@ -22,7 +24,8 @@ python qa/LoRA_Qwen35_QA_4090.py \
   --warmup_ratio 0.03 \
   --save_steps 200 \
   --max_seq_len 2048 \
-  --val_ratio 0.05 \
+  --split_manifest "$SPLIT_MANIFEST" \
+  --exclude_unmatched \
   --seed 42
 
 
