@@ -8,6 +8,20 @@ from .actor import prompt_hash
 from .common import file_sha256
 
 
+def generation_stop_ids(tokenizer, generation_config):
+    # Chat EOS can differ from the base model's end-of-text EOS.
+    configured = generation_config.eos_token_id
+    candidates = [tokenizer.eos_token_id] + (configured if isinstance(configured, list) else [configured])
+    ids = list(dict.fromkeys(v for v in candidates if type(v) is int and v >= 0))
+    if not ids:
+        raise ValueError("Local preference requires a valid EOS token")
+    return ids
+
+
+def generation_finish(token_ids, stop_ids, max_tokens):
+    return "stop" if token_ids and token_ids[-1] in stop_ids else ("length" if len(token_ids) >= max_tokens else "stop")
+
+
 class LocalPreference:
     def __init__(self):
         self.identity = None
@@ -59,15 +73,18 @@ class LocalPreference:
             raise ValueError("Local preference prompt exceeds declared 16384-token total budget")
         set_seed(seed)
         started = time.monotonic()
-        options = {"max_new_tokens": config.max_tokens, "do_sample": config.temperature > 0,
-                   "pad_token_id": self.tokenizer.pad_token_id or self.tokenizer.eos_token_id}
+        stop_ids = generation_stop_ids(self.tokenizer, self.model.generation_config)
+        options = {"eos_token_id": stop_ids, "max_new_tokens": config.max_tokens, "do_sample": config.temperature > 0,
+                   "pad_token_id": self.tokenizer.pad_token_id if self.tokenizer.pad_token_id is not None else stop_ids[0]}
         if config.temperature > 0:
             options.update(temperature=config.temperature, top_p=config.top_p)
         with torch.inference_mode():
             generated = self.model.generate(**inputs, **options)
         ids = generated[0, count:]
-        finish = "length" if len(ids) >= config.max_tokens else "stop"
+        token_ids = ids.tolist()
+        finish = generation_finish(token_ids, stop_ids, config.max_tokens)
         return {"status": "ok", "output": self.tokenizer.decode(ids, skip_special_tokens=True),
+            "generated_token_ids": token_ids, "stop_token_ids": stop_ids,
             "finish_reason": finish, "quality_flags": ["truncated"] if finish == "length" else [],
             "usage": {"prompt_tokens": count, "completion_tokens": len(ids), "total_tokens": count + len(ids)},
             "latency_seconds": time.monotonic() - started, "confidence": {"available": False},
