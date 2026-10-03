@@ -145,6 +145,8 @@ def extract_code(text: str) -> str:
 RUNNER_SOURCE = r'''
 import json, math, sys, traceback
 
+if hasattr(sys, "set_int_max_str_digits"):
+    sys.set_int_max_str_digits(0)
 payload = json.load(open(sys.argv[1], encoding="utf-8"))
 namespace = {"__name__": "__router_candidate__"}
 result = {"passed": 0, "total": 0, "failures": []}
@@ -169,6 +171,10 @@ try:
         try:
             args = case if isinstance(case, list) else [case]
             actual = func(*args)
+            if payload.get("output_format") == "apps_singleton_wrapper":
+                if not isinstance(expected, list) or len(expected) != 1:
+                    raise ValueError("APPS expected output must have one wrapper element")
+                expected = expected[0]
             if canonical(actual) == canonical(expected):
                 result["passed"] += 1
             elif len(result["failures"]) < 3:
@@ -203,6 +209,7 @@ def code_metrics(prediction: str, tests: dict[str, Any], timeout: int = 12) -> d
         "fn_name": tests["fn_name"],
         "inputs": tests["inputs"],
         "outputs": tests["outputs"],
+        "output_format": tests.get("output_format", "direct"),
     }
     with tempfile.TemporaryDirectory(prefix="gain_router_code_") as temp_dir:
         temp = Path(temp_dir)

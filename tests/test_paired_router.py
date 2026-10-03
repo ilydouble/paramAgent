@@ -32,6 +32,18 @@ class PairedRouterTests(unittest.TestCase):
 
         return collect_pair(self.task, self.actor, self.preference, invoke, rounds, "run", "attempt")
 
+    def test_apps_output_wrapper_preserves_real_list_return(self):
+        from gain_router.verifiers import code_metrics
+        for code, expected in (("def f(): return 6", [6]),
+                               ("def f(): return [6]", [[6]]),
+                               ("def f(): return 10**5000", [10**5000])):
+            tests = {"fn_name": "f", "inputs": [[]], "outputs": [expected],
+                     "output_format": "apps_singleton_wrapper"}
+            self.assertTrue(code_metrics(code, tests)["success"])
+        self.assertFalse(code_metrics("def f(): return [6]",
+            {"fn_name": "f", "inputs": [[]], "outputs": [[6]],
+             "output_format": "apps_singleton_wrapper"})["success"])
+
     def test_shared_initial_equal_actor_budget_and_guidance_boundary(self):
         record = self.record()
         self.assertEqual(len(self.calls), 7)
@@ -168,6 +180,8 @@ class PairedRouterTests(unittest.TestCase):
             self.assertEqual(len(tasks), 3)
             self.assertTrue(all("gold" not in t and "tests" not in t for t in tasks))
             self.assertTrue((root / "pool/supervision.jsonl").exists())
+            exported = [json.loads(l) for l in (root / "pool/supervision.jsonl").read_text().splitlines()]
+            self.assertEqual(next(v for v in exported if v["domain"] == "code")["tests"]["output_format"], "apps_singleton_wrapper")
 
 
 if __name__ == "__main__":

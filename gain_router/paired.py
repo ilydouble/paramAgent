@@ -145,7 +145,8 @@ def prepare_pool(root, output, seed=42):
             task = TaskSample.from_dict({"sample_id": sid, "group_id": gid, "domain": domain,
                 "problem": row["problem"], "context": row.get("context", ""), "split": split, "split_seed": seed})
             supervision = OfflineSupervision.from_dict({"sample_id": sid, "group_id": gid, "domain": domain,
-                "gold": row.get("gold"), "tests": row.get("tests")})
+                "gold": row.get("gold"), "tests": ({**row["tests"],
+                    "output_format": "apps_singleton_wrapper"} if domain == "code" else None)})
             retained.setdefault(sid, (asdict(task), asdict(supervision)))
         task_rows.extend(t for t, _ in retained.values())
         supervision_rows.extend(s for _, s in retained.values())
@@ -325,7 +326,8 @@ def label(run, supervision_path, output, *, allow_code_execution=False):
         "positive": sum(r["label"] == 1 for r in rows), "negative": sum(r["label"] == 0 for r in rows),
         "trajectory_sha256": file_sha256(run / "trajectories.jsonl"),
         "supervision_sha256": file_sha256(supervision_path),
-        "scorer_sha256": file_sha256(Path(__file__))}
+        "scorer_sha256": file_sha256(Path(__file__)),
+        "verifier_sha256": file_sha256(Path(__file__).with_name("verifiers.py"))}
     write_json_atomic(output / "report.json", report)
     return report
 
