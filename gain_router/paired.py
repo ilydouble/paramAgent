@@ -129,8 +129,11 @@ def prepare_pool(root, output, seed=42):
             else:
                 part, _ = load_qa_rows(root / source, find_qa_context_files(root, None), seed, old_split)
             rows.extend(part)
-        retained, overlap = {}, 0
+        retained, overlap, missing_gold = {}, 0, 0
         for row in rows:
+            if domain != "code" and (not isinstance(row.get("gold"), str) or not row["gold"].strip()):
+                missing_gold += 1
+                continue
             raw = original[row["source_index"]]
             text = raw["problem"] if domain == "math" else raw["question"]
             if norm(text) in heldout or (domain == "code" and norm(raw.get("func_sign", "")) in heldout):
@@ -148,6 +151,7 @@ def prepare_pool(root, output, seed=42):
         supervision_rows.extend(s for _, s in retained.values())
         audit[domain] = {"source_rows": len(original), "loader_rows": len(rows),
             "eligible_groups": len(retained), "exact_test_overlap_removed": overlap,
+            "missing_gold_removed": missing_gold,
             "source_sha256": file_sha256(root / source), "test_sha256": file_sha256(root / heldout_path),
             "train": sum(t["split"] == "train" for t, _ in retained.values()),
             "val": sum(t["split"] == "val" for t, _ in retained.values())}

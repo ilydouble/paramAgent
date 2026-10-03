@@ -152,7 +152,8 @@ class PairedRouterTests(unittest.TestCase):
                 p.parent.mkdir(parents=True, exist_ok=True)
                 p.write_text(json.dumps(rows) if p.suffix == ".json" else "".join(json.dumps(r) + "\n" for r in rows))
             code = [{"source_index": 0, "problem": "write code def f():", "tests": {"inputs": [[]], "outputs": [1], "fn_name": "f"}}]
-            math = [{"source_index": 0, "problem": "calculate one", "gold": "1"}]
+            math = [{"source_index": 0, "problem": "calculate one", "gold": "1"},
+                    {"source_index": 0, "problem": "missing answer", "gold": " "}]
             qa = [{"source_index": 0, "problem": "Capital of France?", "gold": "Paris", "context": "France is in Europe"}]
             # Each old partition yields duplicates: combine then group/deduplicate.
             with patch("gain_router.datasets.load_code_rows", return_value=(code, {})) as c, \
@@ -162,6 +163,7 @@ class PairedRouterTests(unittest.TestCase):
                 audit = prepare_pool(root, root / "pool")
                 self.assertEqual(c.call_count, 3)
             self.assertTrue(all(v["eligible_groups"] == 1 for v in audit.values()))
+            self.assertEqual(audit["math"]["missing_gold_removed"], 3)
             tasks = [json.loads(l) for l in (root / "pool/tasks.jsonl").read_text().splitlines()]
             self.assertEqual(len(tasks), 3)
             self.assertTrue(all("gold" not in t and "tests" not in t for t in tasks))
