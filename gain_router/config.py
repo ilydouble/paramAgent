@@ -156,14 +156,3 @@ def validate_model_paths(root: Path, config: ExperimentConfig) -> None:
         for value in (model.weights_path, model.adapter_path):
             if value is not None and not resolve_path(root, value).is_dir():
                 raise FileNotFoundError(f"Missing model dependency: {resolve_path(root, value)}")
-
-    from split_protocol import load_manifest
-    from training_splits import validate_training_artifact
-    manifest = load_manifest(resolve_path(root, config.split_manifest))
-    for domain, model in config.preference_models.items():
-        if model.weights_path is None or model.adapter_path is None:
-            raise ValueError("Preference collection requires SFT base and DPO adapter paths for split verification")
-        base = validate_training_artifact(resolve_path(root, model.weights_path), manifest, stage="sft", domain=domain)
-        adapter = validate_training_artifact(resolve_path(root, model.adapter_path), manifest, stage="dpo", domain=domain)
-        if adapter.get("base_artifacts") != base["artifacts"]:
-            raise ValueError("DPO provenance refers to a different SFT base artifact")

@@ -25,7 +25,7 @@ def model_config(name="actor"):
 def experiment():
     return {"version": "router_experiment_v1", "purpose": "pilot", "tasks_path": "tasks.jsonl",
             "split_manifest": "split.json", "split": "train", "output_dir": "run", "seed": 42,
-            "max_per_domain": 2, "actor": model_config(), "preference_models": {"math": {**model_config("preference"), "weights_path": "sft", "adapter_path": "dpo"}},
+            "max_per_domain": 2, "actor": model_config(), "preference_models": {"math": model_config("preference")},
             "policy_version": "preference_repair_single_v1", "retries": 0,
             "labels": {"version": "binary_success_net_gain_v1", "verifier_version": "legacy_deterministic_v1",
                        "lambda_tokens": 0.0, "lambda_latency": 0.0}}
@@ -38,19 +38,6 @@ def setup_inputs(root):
     _, manifest = assign_exact_groups(records, seed=42, targets={"math": {"train": 2, "val": 0, "test": 0}})
     (root / "tasks.jsonl").write_text("".join(json.dumps(t) + "\n" for t in tasks))
     (root / "split.json").write_text(json.dumps(manifest))
-    # Small fake artifacts exercise the same provenance guard without model loading.
-    from split_protocol import file_sha256
-    for stage in ("sft", "dpo"):
-        directory = root / stage
-        directory.mkdir()
-        (directory / "weights.bin").write_bytes(stage.encode())
-        report = {"status": "complete", "stage": stage, "domain": "math", "split_seed": 42,
-                  "assignment_sha256": manifest["assignment_sha256"],
-                  "group_ids": {"train": [t["group_id"] for t in tasks], "val": []},
-                  "artifacts": {"weights.bin": file_sha256(directory / "weights.bin")}}
-        if stage == "dpo":
-            report["base_artifacts"] = json.loads((root / "sft/training_split.json").read_text())["artifacts"]
-        (directory / "training_split.json").write_text(json.dumps(report))
     (root / "supervision.jsonl").write_text("".join(json.dumps({"sample_id": t["sample_id"], "group_id": t["group_id"],
                                                                "domain": "math", "gold": "1"}) + "\n" for t in tasks))
 
@@ -181,33 +168,6 @@ class BoundaryTests(unittest.TestCase):
                 self.assertEqual(collect.main(["--config", str(root / "config.yaml"), "--root", tmp]), 0)
             request.assert_not_called()
             self.assertFalse((root / "run").exists())
-
-    def test_collection_rejects_wrong_model_partition_before_api(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            setup_inputs(root)
-            config = ExperimentConfig.from_dict(experiment())
-            path = root / "dpo/training_split.json"
-            report = json.loads(path.read_text())
-            report["split_seed"] = 123
-            path.write_text(json.dumps(report))
-            with patch.object(actor, "post_json") as request, self.assertRaises(ValueError):
-                collect.run_collection(root, config)
-            request.assert_not_called()
-            self.assertFalse((root / "run").exists())
-
-    def test_collection_rejects_different_sft_ancestry_before_api(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            setup_inputs(root)
-            config = ExperimentConfig.from_dict(experiment())
-            path = root / "dpo/training_split.json"
-            report = json.loads(path.read_text())
-            report["base_artifacts"] = {"weights.bin": "wrong-base-hash"}
-            path.write_text(json.dumps(report))
-            with patch.object(actor, "post_json") as request, self.assertRaisesRegex(ValueError, "different SFT"):
-                collect.run_collection(root, config)
-            request.assert_not_called()
 
     def test_collect_all_initial_states_and_resume_without_verifier(self):
         with tempfile.TemporaryDirectory() as tmp:

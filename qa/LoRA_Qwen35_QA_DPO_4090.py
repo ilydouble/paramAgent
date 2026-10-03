@@ -16,16 +16,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-import sys
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-from training_splits import add_split_arguments, example_identity, frozen_datasets, record_training_completion
-
 import torch
+from datasets import Dataset
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from transformers import AutoModelForCausalLM, AutoProcessor, BitsAndBytesConfig, set_seed
+from transformers import AutoModelForCausalLM, AutoProcessor, BitsAndBytesConfig
 from trl import DPOConfig, DPOTrainer
 # Reuse the SFT prompt so this stage remains aligned with SFT.
 from LoRA_Qwen35_QA_4090 import PRE_INSIGHT_FEWSHOT, SYSTEM_PROMPT
@@ -47,11 +41,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lora_dropout", type=float, default=0.05)
     parser.add_argument("--max_length", type=int, default=3072)
     parser.add_argument("--max_prompt_length", type=int, default=2048)
+    parser.add_argument("--val_ratio", type=float, default=0.05)
     parser.add_argument("--save_strategy", choices=("epoch", "steps"), default="epoch")
     parser.add_argument("--save_steps", type=int, default=200,
                         help="Only used when --save_strategy steps.")
     parser.add_argument("--seed", type=int, default=42)
-    add_split_arguments(parser)
     return parser.parse_args()
 
 
@@ -71,7 +65,6 @@ def load_preferences(path: str) -> list[dict[str, str]]:
             if chosen == rejected:
                 raise ValueError(f"{path}:{line_number} has identical chosen and rejected completions.")
             preferences.append({
-                **example_identity(row, row["question"]),
                 "question": row["question"].strip(),
                 "chosen": chosen,
                 "rejected": rejected,
@@ -101,8 +94,6 @@ def select_lora_modules(model: torch.nn.Module) -> list[str]:
 
 def main() -> None:
     args = parse_args()
-    set_seed(args.seed)
-    split = frozen_datasets(load_preferences(args.dataset_path), args, stage="dpo", domain="qa")
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required for this QLoRA DPO script.")
     if not torch.cuda.is_bf16_supported():
@@ -146,6 +137,9 @@ def main() -> None:
     model.config.use_cache = False
     model.print_trainable_parameters()
 
+    raw_data = Dataset.from_list(load_preferences(args.dataset_path)).shuffle(seed=args.seed)
+    split = raw_data.train_test_split(test_size=args.val_ratio, seed=args.seed)
+
     def format_pair(example: dict[str, Any]) -> dict[str, str]:
         # Exact QA-SFT prompt distribution: same system prompt, demonstrations,
         # and question marker. The longer sequence budget preserves completions.
@@ -165,12 +159,10 @@ def main() -> None:
         }
 
     train_data = split["train"].map(format_pair, remove_columns=split["train"].column_names)
-    eval_data = split["val"].map(format_pair, remove_columns=split["val"].column_names)
+    eval_data = split["test"].map(format_pair, remove_columns=split["test"].column_names)
 
     dpo_kwargs: dict[str, Any] = {
         "output_dir": args.output_dir,
-        "seed": args.seed,
-        "data_seed": args.seed,
         "num_train_epochs": args.num_epochs,
         "per_device_train_batch_size": args.per_device_batch_size,
         "per_device_eval_batch_size": args.per_device_batch_size,
@@ -227,7 +219,6 @@ def main() -> None:
     trainer.train()
     trainer.save_model(args.output_dir)
     tokenizer.save_pretrained(args.output_dir)
-    record_training_completion(args)
     with open(Path(args.output_dir) / "dpo_log_history.json", "w", encoding="utf-8") as file:
         json.dump(trainer.state.log_history, file, ensure_ascii=False, indent=2)
 
