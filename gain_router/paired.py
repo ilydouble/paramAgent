@@ -20,6 +20,7 @@ from .inputs import call_seed, read_objects, select_tasks
 from .policies import execute_initial, task_prompt
 from .schema import DecisionState, ModelCall, OfflineSupervision, StrategyTrace, TaskSample, strict_keys
 from .traces import TraceRecorder, write_json_atomic
+from .paired_storage import STORAGE_FORMAT, compact_event_data, compact_result
 
 PROTOCOL = "router_paired_multiround_v1"
 
@@ -166,7 +167,7 @@ def prepare_pool(root, output, seed=42):
     return audit
 
 
-def collect(tasks_path, settings_path, output, *, execute=False, local_preference=False):
+def collection_config(tasks_path, settings_path, *, local_preference=False):
     settings, actor, preferences = load_settings(settings_path)
     all_tasks = [TaskSample.from_dict(v) for v in read_objects(tasks_path)]
     seen, groups = set(), {}
@@ -184,10 +185,19 @@ def collect(tasks_path, settings_path, output, *, execute=False, local_preferenc
     identity = {"protocol": PROTOCOL, "settings": settings, "local_preference": local_preference,
         "tasks_sha256": file_sha256(tasks_path), "selected_tasks": [asdict(t) for t in tasks],
         "code_sha256": {p.name: file_sha256(p) for p in Path(__file__).parent.glob("*.py")},
+        "storage_format": STORAGE_FORMAT,
         "endpoint_identity": "declared; verify deployed weights separately"}
+    return settings, actor, preferences, tasks, identity
+
+
+def collect(tasks_path, settings_path, output, *, execute=False, local_preference=False):
+    settings, actor, preferences, tasks, identity = collection_config(
+        tasks_path, settings_path, local_preference=local_preference)
     if not execute:
         return {"dry_run": True, "selected_total": len(tasks), "rounds": settings["rounds"],
                 "calls_per_task": 1 + 3 * settings["rounds"]}
+    if (output / ".storage-migration.pending.json").exists():
+        raise ValueError("Storage migration incomplete; finish explicit recovery before resuming")
     preference_client = None
     if local_preference:
         from .local_preference import LocalPreference
@@ -227,15 +237,17 @@ def collect(tasks_path, settings_path, output, *, execute=False, local_preferenc
                 if role == "preference" and preference_client is not None:
                     result = preference_client(model, system, user, seed)
                     recorder.event("local_preference.completed", sample_id=task.sample_id,
-                        attempt_id=attempt, stage=stage, data={"request": request, "result": result})
+                        attempt_id=attempt, stage=stage,
+                        data=compact_event_data({"request": request, "result": result}))
                 else:
                     result = call_actor(base_url=model.endpoint, model=model.model_id,
                         system=system, user=user, temperature=model.temperature, max_tokens=model.max_tokens,
                         seed=seed, timeout=240, retries=1,
                         top_p=model.top_p, enable_thinking=model.enable_thinking,
+                        compact=True,
                         trace=lambda event, data: recorder.event(event, sample_id=task.sample_id,
                             attempt_id=attempt, stage=stage, data=data))
-                call = ModelCall(role, model.model_id, model.revision, result)
+                call = ModelCall(role, model.model_id, model.revision, compact_result(result))
                 write_json_atomic(checkpoint, {"request": request, "call": asdict(call)})
                 return call
 

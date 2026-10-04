@@ -60,10 +60,14 @@ def call_actor(
     trace: Callable[[str, dict[str, Any]], None] | None = None,
     top_p: float = 0.9,
     enable_thinking: bool | None = None,
+    compact: bool = False,
 ) -> dict[str, Any]:
     def emit(event: str, data: dict[str, Any]) -> None:
         if trace:
             try:
+                if compact:
+                    from .paired_storage import compact_event_data
+                    data = compact_event_data(data)
                 trace(event, data)
             except Exception as exc:
                 raise TraceWriteError(f"Cannot persist {event}: {exc}") from exc
@@ -77,7 +81,7 @@ def call_actor(
         "max_tokens": max_tokens,
         "seed": seed,
         "logprobs": True,
-        "top_logprobs": 5,
+        "top_logprobs": 0 if compact else 5,
     }
     if enable_thinking is not None:
         payload["chat_template_kwargs"] = {"enable_thinking": enable_thinking}
@@ -135,6 +139,9 @@ def call_actor(
             if attempt < retries:
                 time.sleep(min(2**attempt, 8))
             continue
+        if compact:
+            from .paired_storage import compact_result
+            result = compact_result(result)
         emit("request.completed", {"request_attempt": attempt + 1, "call": result})
         return result
     raise RuntimeError(f"actor request failed after {retries + 1} attempts: {last_error}")

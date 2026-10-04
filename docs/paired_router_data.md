@@ -111,6 +111,41 @@ QA保留EM/F1、Code保留通过率；第一版标签只使用最终是否正确
 每个输出目录绑定配置、输入和代码哈希；修改轮数/预算/模型必须换新目录。日志保留逐调用请求和响应。
 已完成题可在批次结束前独立离线评分，之后用新输出目录对新增轨迹重新评分，不覆盖旧标签。
 
+## 精简存储与旧断点迁移
+
+双分支采集使用 `paired_compact_v1`。仍请求每个生成token的logprob来计算平均、最低、
+低10%分位概率，但不请求额外候选token（`top_logprobs=0`），统计后不落盘完整原始响应。
+调用缓存保留完整请求以及回答、推理、统计、结束原因、质量标记、用量、耗时和随机种子；
+结果不重复保存messages。2B生成token ID仍保留供EOS检查。
+事件日志只记请求哈希、响应摘要和结果摘要；完整回答保存在缓存与轨迹中。
+旧单轮/legacy客户端默认行为不变。该修改不改变双分支提示、采样、轮数或评分规则。
+
+2026-10-04 当前批次缩小到每领域2000题，train/val为1800/200，共6000题；
+目录为 `/root/autodl-tmp/lrr/router-paired-2000-per-domain-20261004`。
+采集在82题完整轨迹、1315次缓存调用处主动暂停；第83题已保存3次调用。
+服务器迁移已完成：记录文件由2,552,080,243字节降为41,333,827字节，
+原始gzip备份为341,037,105字节，位于该目录的 `backups/run-train-before-compact.tar.gz`。
+备份逐文件解压后SHA256一致；另逐条核对全部82条轨迹和1315个调用缓存，
+除删除raw_response/messages外，回答、请求、置信度及其他结果字段完全一致。
+新配置通过TraceRecorder断点兼容检查；服务器46项相关测试通过，采集仍暂停。
+
+迁移前必须停止采集与启动器。迁移脚本获取两个写锁，要求题池、设置及模型身份完全一致，
+只接受脚本内明确声明的旧actor/paired源码哈希，其他核心模块必须保持一致。
+先在运行目录外生成gzip tar备份，逐文件解压并核对SHA256；验证后才替换精简文件。
+run ID保留，代码指纹显式迁移；`storage-migration.json`记录原/新指纹、备份哈希、文件哈希与数量。
+若替换中断，pending标记阻止续跑，需按记录的备份和staging目录恢复，不能直接删标记。
+
+```bash
+RUN=/root/autodl-tmp/lrr/router-paired-2000-per-domain-20261004
+/root/autodl-tmp/lrr/code2-merge-env/bin/python scripts/compact_paired_run.py \
+  --run "$RUN/run-train" --tasks "$RUN/pool/tasks.jsonl" \
+  --settings "$RUN/settings-train.json" --local-preference \
+  --backup "$RUN/backups/run-train-before-compact.tar.gz"
+```
+
+该命令不调用模型、不读取标准答案、不恢复采集。备份路径必须不存在，且位于run-train目录外。
+迁移后用原启动命令续跑；已有完整题跳过，未完成题按精确请求复用缓存。
+
 ## 2026-10-03 服务器小批量验证
 
 服务器目录：`/root/autodl-tmp/lrr/router-paired-smoke-20261003`。
