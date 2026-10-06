@@ -1,1 +1,7 @@
-"""Auditable gain-router data tooling; legacy G/D pilot is not the final policy."""
+"""Compatibility namespace for SCORE data tooling.
+
+Keep historical module identities and CLI commands stable during migration.
+"""
+from pathlib import Path
+
+__path__ = [str(Path(__file__).resolve().parents[1] / "score" / "data")]

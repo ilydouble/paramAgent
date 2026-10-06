@@ -1,3 +1,7 @@
+# 方法架构与入口
+
+ParamAgent 基线与 SCORE 已分离入口。目录职责、兼容策略及使用命令见 [架构说明](docs/method_architecture.md)。SFT/DPO 专家训练分别使用 `python -m training.sft` 与 `python -m training.dpo`；旧命令继续可用。
+
 python3 dataset/router/train_router.py \
   --model_path /root/autodl-tmp/lrr/ParamAgent/models/deberta-v3-base \
   --output_dir dataset/router/router_model_output \
