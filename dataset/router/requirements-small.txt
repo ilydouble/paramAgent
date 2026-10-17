@@ -1,0 +1,5 @@
+numpy>=1.24
+scipy>=1.10
+scikit-learn==1.9.1
+joblib>=1.4
+# Frozen encoder additionally requires torch and transformers.
