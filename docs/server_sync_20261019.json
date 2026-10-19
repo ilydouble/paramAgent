@@ -1,0 +1,45 @@
+{
+  "server_head": "938ef8e02c9e6a6e801366b2605944702ff9aa00",
+  "local_head_before_sync": "ba84b40",
+  "bundle_sha256": "0b853488cc131f30c0cd2c294fb0bb6b8633d8e8bb056bb01f1afa73e435f57b",
+  "worktree_archive_sha256": "97d294d391f9a0739cb83c9c63c07559722613a929144a191871316d13f60472",
+  "worktree_sources": [
+    {
+      "server_path": "gain_router/actor.py",
+      "local_path": "score/data/actor.py",
+      "sha256": "9e90c5f2cc20cffa469e1ef54504beae6850c180b337b0540d8760b344005b8b",
+      "already_present": true
+    },
+    {
+      "server_path": "gain_router/paired.py",
+      "local_path": "score/data/paired.py",
+      "sha256": "914ea561ba343f53b685dd5822567b825fe7350a247d0794333cd531984b00c5",
+      "already_present": true
+    },
+    {
+      "server_path": "gain_router/paired_storage.py",
+      "local_path": "score/data/paired_storage.py",
+      "sha256": "e6f2088ddda185edf9f7c0d73ed3ec79c2f151bf5150c099ab43bcd88515d1e2",
+      "already_present": true
+    },
+    {
+      "server_path": "scripts/compact_paired_run.py",
+      "local_path": "scripts/compact_paired_run.py",
+      "sha256": "9a3aeb95660af38aca0afd3a8b46eeb38364eb4da2addd9d570a96996a4de0bf",
+      "already_present": true
+    },
+    {
+      "server_path": "scripts/run_full_paired_router.py",
+      "local_path": "scripts/run_full_paired_router.py",
+      "sha256": "9f14c4b5ede9d338399b5cfbd29743ce5b5cb75208f955cb2a2ad40496bb2a15",
+      "already_present": true
+    },
+    {
+      "server_path": "tests/test_paired_storage.py",
+      "local_path": "tests/test_paired_storage.py",
+      "sha256": "438b22cf45785b6876813ebf984f6c7eafe578e50ec4f3f07e7098f53e2291dd",
+      "already_present": true
+    }
+  ],
+  "note": "Six server worktree sources already match local content; gain_router sources live under score/data after the local compatibility migration."
+}
