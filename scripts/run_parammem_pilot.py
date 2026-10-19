@@ -261,9 +261,7 @@ class LocalMemory:
             return self.journal.cache[key]["output"]
         self.load()
         import torch
-        from transformers import set_seed
         from gain_router.local_preference import generation_stop_ids, generation_finish
-        set_seed(request["seed"])
         prompt = self.tokenizer.apply_chat_template(messages, tokenize=False,
             add_generation_prompt=True, enable_thinking=False)
         inputs = self.tokenizer(prompt, return_tensors="pt").to("cuda")
@@ -275,7 +273,10 @@ class LocalMemory:
         if temperature > 0:
             options.update(temperature=temperature, top_p=0.9)
         started = time.monotonic()
-        with torch.inference_mode():
+        # Memory sampling must not reset the runner's Python/NumPy search RNGs,
+        # or make search behavior depend on whether a response was cached.
+        with torch.random.fork_rng(devices=[0]), torch.inference_mode():
+            torch.manual_seed(request["seed"])
             tokens = self.model.generate(**inputs, **options)[0, inputs["input_ids"].shape[1]:]
         output = self.tokenizer.decode(tokens, skip_special_tokens=True)
         if not output.strip():

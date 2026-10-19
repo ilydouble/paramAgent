@@ -14,6 +14,7 @@ ParamMem（SFT 2B）和 ParamMem-DPO（同一 SFT 底座加 DPO adapter）。
 - 记忆输入沿用 SFT 训练模板：Code 函数签名、Math 题目、QA 问题拆解及其既有示例。
   不使用 paired 的 task + current response 通用批评提示。
 - 沿用领域 runner 的采样温度；同一请求首个样本种子42，重复采样依次43、44等，记忆输出上限3072。
+  记忆采样仅在隔离的 PyTorch RNG 上设置种子，不重置 runner 的 Python/NumPy 搜索状态。
   所有 actor 原始请求/响应、记忆输出、截断标志和评分记录保存在 `calls.jsonl`。
 - 小型 MiniLM 在 CPU 上做512-token截断、attention-mask均值池化和L2归一化。
   三组使用同一模型。各组的记忆库独立，从空库开始，仅加入该组生成的轨迹。
