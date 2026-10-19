@@ -49,6 +49,10 @@ python scripts/run_parammem_pilot.py \
 身份文件固定输入、runner、harness和权重哈希；身份不同拒绝复用输出。
 每次调用追加并 fsync，重启时从日志恢复相同请求的输出。
 `completed.json` 仅在10题结果齐全且不存在未决评分后生成。
+最终结果读取 `second_stage_log.jsonl`；没有首阶段失败时读取 `first_stage_log.jsonl`。
+`results.jsonl` 是原 runner 的首阶段记录，不能用来统计检索阶段后的最终成绩。
+首阶段失败但没有完成第二阶段的记录会阻止汇总。早期 `e21e0e1` 快照的
+`completed.json.successes` 只统计首阶段，分析该快照时需按上述文件重新汇总。
 实验输入、权重、轨迹和结果不随源码提交。
 
 离线测试：`python -m unittest discover -s tests -p test_parammem_pilot.py -v`。

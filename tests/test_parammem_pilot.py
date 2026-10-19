@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -10,6 +11,17 @@ spec.loader.exec_module(pilot)
 
 
 class PilotTests(unittest.TestCase):
+    def test_final_results_include_second_stage_recovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            first = [{"task_id": "a", "is_solved": False}, {"task_id": "b", "is_solved": True}]
+            final = [{"task_id": "a", "is_solved": True, "stage2": True}, first[1]]
+            (path / "first_stage_log.jsonl").write_text("\n".join(map(json.dumps, first)))
+            with self.assertRaisesRegex(RuntimeError, "not completed"):
+                pilot.stage_results(path)
+            (path / "second_stage_log.jsonl").write_text("\n".join(map(json.dumps, final)))
+            self.assertEqual(sum(r["is_solved"] for r in pilot.stage_results(path)[1]), 2)
+
     def test_humaneval_contract_accepts_correct_and_rejects_wrong(self):
         test = "def check(candidate):\n    assert candidate(2,3)==5\ncheck(add)"
         self.assertTrue(pilot.code_check("def add(a,b): return a+b", test)[0])

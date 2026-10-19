@@ -50,6 +50,24 @@ def read_rows(path):
     return [json.loads(s) for s in Path(path).read_text().splitlines() if s.strip()]
 
 
+def stage_results(directory):
+    """The legacy results.jsonl stops at Stage 1; Stage 2 has its own file."""
+    directory = Path(directory)
+    first = read_rows(directory / "first_stage_log.jsonl")
+    second = directory / "second_stage_log.jsonl"
+    final = read_rows(second) if second.exists() else first
+    initial_ids = {r["task_id"] for r in first}
+    if len(first) != len(initial_ids) or len(final) != len(first) or {r["task_id"] for r in final} != initial_ids:
+        raise RuntimeError("Stage result IDs are incomplete or duplicated")
+    by_id = {r["task_id"]: r for r in final}
+    for row in first:
+        if not row["is_solved"] and not by_id[row["task_id"]].get("stage2"):
+            raise RuntimeError("Stage 1 failure was not completed in Stage 2")
+        if row["is_solved"] and not by_id[row["task_id"]]["is_solved"]:
+            raise RuntimeError("Stage 2 lost a Stage 1 success")
+    return first, final
+
+
 def literal_assignment(path, name):
     for node in ast.parse(Path(path).read_text()).body:
         if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
@@ -359,12 +377,13 @@ def run(args):
     if any(c.get("type") == "evaluation" and c["result"]["success"] is None
            for c in read_rows(args.output / "calls.jsonl")):
         raise RuntimeError("Unresolved evaluations remain; run cannot be reported as complete")
-    final = read_rows(args.output / "results.jsonl")
+    first, final = stage_results(args.output)
     if len(final) != 10 or {r["task_id"] for r in final} != {r["task_id"] for r in rows}:
         raise RuntimeError("Legacy runner produced incomplete or mismatched results")
     if any("is_solved" not in r for r in final):
         raise RuntimeError("Legacy result lacks is_solved")
     summary = {"domain": args.domain, "method": args.method, "n": 10,
+               "stage1_successes": sum(bool(r["is_solved"]) for r in first),
                "successes": sum(bool(r["is_solved"]) for r in final),
                "calls": len(journal.cache), "identity": digest(identity)}
     (args.output / "completed.json").write_text(json.dumps(summary, indent=2) + "\n")
