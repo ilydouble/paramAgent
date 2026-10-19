@@ -58,6 +58,9 @@ def summarize(root):
                            **{k: sum(bool(t[k]) for t in subset) for k in ("first_attempt", "stage1", "final")},
                            "actor_completion_tokens": actor_tokens, "memory_completion_tokens": memory_tokens,
                            "finish_reasons": dict(finish),
+                           **({"seeded_cache": json.loads((directory / "cache-origin.json").read_text()),
+                               "token_accounting": "Logged responses include all seeded cache entries; some may not be used by the repaired replay."}
+                              if (directory / "cache-origin.json").exists() else {}),
                            **({"final_mean_f1": sum(t["final_f1"] for t in subset)/len(subset)} if domain == "qa" else {})})
     pairs = []
     for domain in ("code", "math", "qa"):
