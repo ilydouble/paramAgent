@@ -25,6 +25,9 @@ def summarize(root):
                 if errors:
                     raise RuntimeError(f"Runner errors require inspection: {directory}: {errors}")
             calls = read_rows(directory / "calls.jsonl")
+            consumed = {c["key"] for c in calls if c["type"] == "sample_use"}
+            if consumed:
+                calls = [c for c in calls if c["type"] not in {"actor", "memory"} or c["key"] in consumed]
             evaluations = collections.defaultdict(list)
             actor_tokens = memory_tokens = 0
             finish = collections.Counter()
@@ -59,7 +62,8 @@ def summarize(root):
                            "actor_completion_tokens": actor_tokens, "memory_completion_tokens": memory_tokens,
                            "finish_reasons": dict(finish),
                            **({"seeded_cache": json.loads((directory / "cache-origin.json").read_text()),
-                               "token_accounting": "Logged responses include all seeded cache entries; some may not be used by the repaired replay."}
+                               "token_accounting": ("Consumed cached/new responses; not the cost of new inference alone." if consumed else
+                                                    "Logged responses include all seeded cache entries; some may not be used by the repaired replay.")}
                               if (directory / "cache-origin.json").exists() else {}),
                            **({"final_mean_f1": sum(t["final_f1"] for t in subset)/len(subset)} if domain == "qa" else {})})
     pairs = []

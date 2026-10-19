@@ -176,7 +176,10 @@ class Journal:
         key = (kind, digest(request))
         occurrence = self.occurrences[key]
         self.occurrences[key] += 1
-        return {**request, "seed": request["seed"] + occurrence}
+        sampled = {**request, "seed": request["seed"] + occurrence}
+        self.write({"type": "sample_use", "kind": kind, "key": digest(sampled),
+                    "seed": sampled["seed"], "cached": digest(sampled) in self.cache})
+        return sampled
 
     def write(self, value):
         with (self.directory / "calls.jsonl").open("a") as handle:
