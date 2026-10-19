@@ -9,6 +9,8 @@
 
 术语见 [CONTEXT.md](CONTEXT.md)，当前入口、兼容策略和本地维护流程见 [方法架构](docs/method_architecture.md)。新实验分别使用 `python -m parammem.runner --help` 和 `python -m paramagent.runner --help`。ParamAgent 当前有离线采集及路由训练代码，在线门控任务 runner 尚未接通。
 
+本地目录分工与向量构建脚本见 [本地工作区说明](docs/local_workspace.md)。
+
 下面保留历史工作流说明。旧四分类路由器与预期收益路由器不同；旧脚本默认模型和参数不代表当前 Qwen 对照协议。
 
 python3 dataset/router/train_router.py \

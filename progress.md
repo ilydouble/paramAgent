@@ -11,3 +11,5 @@
 命名阶段：完成 CONTEXT.md、架构文档、入口、配置说明及结果目录区分。65 项主测试通过，四个 CLI help 检查通过；shell 检查发现 QA 生成脚本原有 Markdown 围栏，正在修复并复核。
 
 最终验证：65 项 tests/ 主测试通过；服务器导入的 11 项路由训练测试通过（NumPy/sklearn 本地运行时警告，未改算法）；12 份相关 shell 通过 bash -n；17 个迁移数据模块与命名前 HEAD 逐字节一致。新旧四个 CLI help 正常，git diff --check 通过。仅在本地提交，未 push、未部署服务器、未调用模型。
+
+2026-10-19：本地工作区分为代码、论文、实验、项目记录和归档。原向量生成脚本移入 scripts/build_api_vectors.py，移除个人目录硬编码，分块/缓存键/聚合与冻结样本协议不变。3 项离线测试通过；真实 3372 条输入与已导出 metadata 完全一致；已有完整输出在新路径下跳过且不读取凭据/调用 API。代码 diff --check 通过；目录说明见 docs/local_workspace.md。
