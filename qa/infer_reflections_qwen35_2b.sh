@@ -1,4 +1,5 @@
 #!/bin/bash
+# Method: ParamMem (SFT memory). Historical generation settings; see docs/method_architecture.md.
 set -e
 
 # This uses the merged Qwen3.5-2B-qa model to generate per-sample QA insights.
@@ -32,4 +33,3 @@ python qa/LoRA_Qwen35_QA_4090_inference.py \
   --max_new_tokens "$MAX_NEW_TOKENS" \
   --num_versions 1 \
   --batch_size 1
-```

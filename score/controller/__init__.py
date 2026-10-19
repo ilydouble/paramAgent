@@ -1,4 +1,2 @@
-"""Reserved for trained binary gain-controller inference.
-
-The historical four-class domain router is not the SCORE gain controller.
-"""
+"""Compatibility alias for paramagent.controller."""
+from paramagent.controller import *  # noqa: F401,F403

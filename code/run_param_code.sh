@@ -3,7 +3,7 @@
 #   export ACTOR_MODEL="deepseek:deepseek-v4-flash-0731"   # aiaaa.cc relay
 #   ACTOR_MODEL="vllm:Qwen3.5-4B"
 #
-# Example — run ParamAgent with DeepSeek as the actor:
+# Example — run ParamMem / ParamMem-DPO with DeepSeek as the actor:
 #   ACTOR_MODEL="relay:qwen3.8-27b" bash code/run_param_code.sh
 set -e
 
@@ -30,9 +30,11 @@ echo "Actor model: $MODEL"
 DATASET_PATH="dataset/code/test/humaneval.jsonl"
 INSIGHT_JSONL="generated_reflections/merged/dpo/code/human_pitfalls_qwen35_2b-merged.jsonl"
 
+METHOD="parammem-dpo"
+
 ARGS=(
-  --run_name "dpo_humaneval_qwen3.5-4b"
-  --root_dir "results/code/dpo/"
+  --run_name "${METHOD}_humaneval"
+  --root_dir "results/code/$METHOD/"
   --dataset_path "$DATASET_PATH"
   --strategy dot
   --language py
@@ -40,9 +42,7 @@ ARGS=(
   --pass_at_k 1
   --max_iters 6
   --inner_iter 1
-  --use_mistakes
-  --mistake_json_path "$INSIGHT_JSONL"
   --device cuda:0
   --verbose
 )
-python code/main_param.py "${ARGS[@]}"
+python -m parammem.runner code --method "$METHOD" --memory-file "$INSIGHT_JSONL" "${ARGS[@]}"

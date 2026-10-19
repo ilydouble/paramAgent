@@ -1,3 +1,5 @@
+> 方法命名已统一：旧文档中无收益路由的 ParamAgent 指 ParamMem（SFT）或 ParamMem-DPO（DPO），按实际记忆来源区分；完整 ParamAgent 指 DPO 记忆 + 收益路由。新入口和当前实现范围以 [方法架构](docs/method_architecture.md) 为准。以下为历史工作流，参数未统一为当前对照协议。
+
 # How To Use Organized Project Code
 
 这个目录是一个整理后的可运行代码版本。建议从 `organized_project_code/`
@@ -565,8 +567,8 @@ Code ParamAgent:
 
 ```bash
 python code/main_param.py \
-  --run_name paramagent_llama3_code \
-  --root_dir results/code/paramagent/ \
+  --run_name parammem_llama3_code \
+  --root_dir results/code/parammem/ \
   --dataset_path benchmarks/humaneval_full.jsonl \
   --strategy dot \
   --language py \
@@ -584,8 +586,8 @@ Math ParamAgent:
 
 ```bash
 python math/mainMath_param.py \
-  --run_name paramagent_llama3_math \
-  --root_dir results/math/paramagent/ \
+  --run_name parammem_llama3_math \
+  --root_dir results/math/parammem/ \
   --dataset_path benchmarks/math/testset.json \
   --strategy dot \
   --language py \
@@ -602,8 +604,8 @@ QA ParamAgent:
 
 ```bash
 python qa/mainQA_parametric.py \
-  --run_name paramagent_llama3_qa \
-  --root_dir results/qa/paramagent/ \
+  --run_name parammem_llama3_qa \
+  --root_dir results/qa/parammem/ \
   --dataset_path benchmarks/light_hotpotqa.json \
   --strategy dot \
   --language py \

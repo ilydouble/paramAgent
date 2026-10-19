@@ -1,4 +1,5 @@
 #!/bin/bash
+# Method: ParamMem (SFT memory). Historical generation settings; see docs/method_architecture.md.
 set -e
 
 # This uses the merged Qwen3.5-2B-code model to generate per-sample code pitfalls.

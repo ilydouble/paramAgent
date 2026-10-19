@@ -3,7 +3,7 @@
 #   ACTOR_MODEL="deepseek:deepseek-v4-flash-0731"   # aiaaa.cc relay
 #   ACTOR_MODEL="vllm:Qwen3.5-4B"
 #
-# Example — run ParamAgent with DeepSeek as the actor:
+# Example — run ParamMem / ParamMem-DPO with DeepSeek as the actor:
 #   ACTOR_MODEL="deepseek:deepseek-v4-flash-0731" bash math/run_param_math.sh
 
 set -e
@@ -30,18 +30,18 @@ echo "Actor model: $MODEL"
 DATASET_PATH="samples_math_150/sample_math_150.jsonl"
 INSIGHT_JSONL="samples_math_150/sample_math_150_sft.jsonl"
 
+METHOD="parammem"
+
 ARGS=(
-  --run_name "sft_math_qwen3.5-4b"
-  --root_dir "results/math/sft2/"
+  --run_name "${METHOD}_math"
+  --root_dir "results/math/$METHOD/"
   --dataset_path "$DATASET_PATH"
   --strategy dot
   --language py
   --model "$MODEL"
   --pass_at_k 1
   --max_iters 6
-  --use_expert_module
-  --insight_json_path "$INSIGHT_JSONL"
   --device cuda:0
   --verbose
 )
-python math/mainMath_param.py "${ARGS[@]}"
+python -m parammem.runner math --method "$METHOD" --memory-file "$INSIGHT_JSONL" "${ARGS[@]}"

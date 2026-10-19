@@ -1,4 +1,5 @@
 #!/bin/bash
+# Method: ParamMem-DPO (SFT base + DPO adapter). Historical generation settings; see docs/method_architecture.md.
 set -e
 
 # 使用 DPO LoRA 模型生成 per-sample QA insights。

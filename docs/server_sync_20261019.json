@@ -6,19 +6,19 @@
   "worktree_sources": [
     {
       "server_path": "gain_router/actor.py",
-      "local_path": "score/data/actor.py",
+      "local_path": "paramagent/data/actor.py",
       "sha256": "9e90c5f2cc20cffa469e1ef54504beae6850c180b337b0540d8760b344005b8b",
       "already_present": true
     },
     {
       "server_path": "gain_router/paired.py",
-      "local_path": "score/data/paired.py",
+      "local_path": "paramagent/data/paired.py",
       "sha256": "914ea561ba343f53b685dd5822567b825fe7350a247d0794333cd531984b00c5",
       "already_present": true
     },
     {
       "server_path": "gain_router/paired_storage.py",
-      "local_path": "score/data/paired_storage.py",
+      "local_path": "paramagent/data/paired_storage.py",
       "sha256": "e6f2088ddda185edf9f7c0d73ed3ec79c2f151bf5150c099ab43bcd88515d1e2",
       "already_present": true
     },
@@ -41,5 +41,5 @@
       "already_present": true
     }
   ],
-  "note": "Six server worktree sources already match local content; gain_router sources live under score/data after the local compatibility migration."
+  "note": "Six server worktree sources already match local content; gain_router sources are now stored under paramagent/data with their module identity preserved."
 }

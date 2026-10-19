@@ -1,7 +1,7 @@
-"""Compatibility namespace for SCORE data tooling.
+"""Compatibility namespace for ParamAgent data tooling.
 
-Keep historical module identities and CLI commands stable during migration.
+Preserve historical gain_router module identities and CLI commands.
 """
 from pathlib import Path
 
-__path__ = [str(Path(__file__).resolve().parents[1] / "score" / "data")]
+__path__ = [str(Path(__file__).resolve().parents[1] / "paramagent" / "data")]

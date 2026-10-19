@@ -1,6 +1,15 @@
-# 方法架构与入口
+# ParamAgent 实验代码
 
-ParamAgent 基线与 SCORE 已分离入口。目录职责、兼容策略及使用命令见 [架构说明](docs/method_architecture.md)。SFT/DPO 专家训练分别使用 `python -m training.sft` 与 `python -m training.dpo`；旧命令继续可用。
+| 名称 | 含义 |
+| --- | --- |
+| Qwen3.5-4B | 主模型基线 |
+| ParamMem（本文复现） | 领域 SFT 2B 记忆 + 主模型 |
+| ParamMem-DPO | 保持 ParamMem 流程，替换为经过 DPO 的 2B 记忆 |
+| ParamAgent | DPO 记忆 + 预期收益路由器的完整方法 |
+
+术语见 [CONTEXT.md](CONTEXT.md)，当前入口、兼容策略和本地维护流程见 [方法架构](docs/method_architecture.md)。新实验分别使用 `python -m parammem.runner --help` 和 `python -m paramagent.runner --help`。ParamAgent 当前有离线采集及路由训练代码，在线门控任务 runner 尚未接通。
+
+下面保留历史工作流说明。旧四分类路由器与预期收益路由器不同；旧脚本默认模型和参数不代表当前 Qwen 对照协议。
 
 python3 dataset/router/train_router.py \
   --model_path /root/autodl-tmp/lrr/ParamAgent/models/deberta-v3-base \
@@ -28,9 +37,9 @@ curl http://localhost:8000/v1/models
 
 
 
-# ParamAgent Finalized
+# 历史领域工作流
 
-This repository contains the organized code for ParamAgent across three domains:
+This repository contains the organized code for ParamMem across three domains:
 code generation, math reasoning, and multi-hop QA. It includes the runnable code,
 the curated benchmark/train-test data, and simple shell scripts for the full
 workflow.
@@ -54,7 +63,7 @@ commands. Collection defaults to a read-only dry run; model calls require
 Run all commands from the repository root:
 
 ```bash
-cd ParamAgentFinalized
+cd ParamAgent
 bash setup.sh
 ```
 
@@ -79,7 +88,7 @@ Each domain follows the same four steps:
 | 1. Generate reflection data | Use an API model to generate training reflections, pitfalls, or decompositions | `benchmarks/...` training JSON |
 | 2. Finetune LoRA | SFT/LoRA finetune Llama3-8B on the generated data | `lora-llama3-8b-*` |
 | 3. Infer reflections | Use the finetuned LLM to generate per-sample reflections for test data | `generated_reflections/.../*.jsonl` |
-| 4. Run agents | Run Base, Reflexion, DoT, DoT-Bank, and ParamAgent | `results/...` |
+| 4. Run agents | Run Base, Reflexion, DoT, DoT-Bank, and ParamMem | `results/...` |
 
 `generated_reflections/`, `results/`, LoRA adapters, and model checkpoints are
 runtime outputs and are ignored by git.
@@ -105,7 +114,7 @@ bash code/finetune_lora_llama3_8b.sh
 # 3. Generate per-sample reflections with the finetuned LoRA
 bash code/infer_reflections_llama3_8b.sh
 
-# 4. Run Base, Reflexion, DoT, DoT-Bank, and ParamAgent
+# 4. Run Base, Reflexion, DoT, DoT-Bank, and ParamMem
 bash code/run_code.sh
 ```
 
@@ -115,9 +124,9 @@ Main Python files:
 - LoRA finetune: `code/LoRA_Llama3_Code_multigpu.py`
 - Reflection inference: `code/LoRA_Llama3_Code_multigpu_inference.py`
 - Base / Reflexion / DoT / DoT-Bank: `code/main.py`
-- ParamAgent: `code/main_param.py`, `code/paramAgent.py`
+- ParamMem: `code/main_param.py`, `code/paramAgent.py`
 
-ParamAgent uses:
+ParamMem uses:
 
 ```text
 generated_reflections/code/humaneval_pitfalls_llama3_8b.jsonl
@@ -143,7 +152,7 @@ bash math/finetune_lora_llama3_8b.sh
 # 3. Generate per-sample reflections with the finetuned LoRA
 bash math/infer_reflections_llama3_8b.sh
 
-# 4. Run Base, Reflexion, DoT, DoT-Bank, and ParamAgent
+# 4. Run Base, Reflexion, DoT, DoT-Bank, and ParamMem
 bash math/run_math.sh
 ```
 
@@ -153,9 +162,9 @@ Main Python files:
 - LoRA finetune: `math/LoRA_Llama3_Math_multigpu.py`
 - Reflection inference: `math/LoRA_Llama3_Math_multigpu_inference.py`
 - Base / Reflexion / DoT / DoT-Bank: `math/mainMath.py`
-- ParamAgent: `math/mainMath_param.py`
+- ParamMem: `math/mainMath_param.py`
 
-ParamAgent uses:
+ParamMem uses:
 
 ```text
 generated_reflections/math/math_pitfalls_llama3_8b.jsonl
@@ -181,7 +190,7 @@ bash qa/finetune_lora_llama3_8b.sh
 # 3. Generate per-sample reflections with the finetuned LoRA
 bash qa/infer_reflections_llama3_8b.sh
 
-# 4. Run Base, Reflexion, DoT, DoT-Bank, and ParamAgent
+# 4. Run Base, Reflexion, DoT, DoT-Bank, and ParamMem
 bash qa/run_qa.sh
 ```
 
@@ -191,9 +200,9 @@ Main Python files:
 - LoRA finetune: `qa/LoRA_Llama3_QA_multigpu.py`
 - Reflection inference: `qa/LoRA_Llama3_QA_multigpu_inference.py`
 - Base / Reflexion / DoT / DoT-Bank: `qa/mainQA.py`
-- ParamAgent: `qa/mainQA_parametric.py`
+- ParamMem: `qa/mainQA_parametric.py`
 
-ParamAgent uses:
+ParamMem uses:
 
 ```text
 generated_reflections/qa/hotpotqa_insights_llama3_8b.jsonl
@@ -207,10 +216,10 @@ generated_reflections/qa/hotpotqa_insights_llama3_8b.jsonl
 | Reflexion | `--strategy reflexion` | `main.py`, `mainMath.py`, `mainQA.py` |
 | DoT | `--strategy dot` | `main.py`, `mainMath.py`, `mainQA.py` |
 | DoT-Bank | `--strategy dot_bank` | `main.py`, `mainMath.py`, `mainQA.py` |
-| ParamAgent | `--strategy dot` plus generated reflection file | `main_param.py`, `mainMath_param.py`, `mainQA_parametric.py` |
+| ParamMem | `--strategy dot` plus generated reflection file | `main_param.py`, `mainMath_param.py`, `mainQA_parametric.py` |
 
 `run_code.sh`, `run_math.sh`, and `run_qa.sh` run all baseline agents first.
-They run ParamAgent only when the Step 3 reflection file exists; otherwise they
+They run ParamMem only when the Step 3 reflection file exists; otherwise they
 print which inference script to run first.
 
 ## Repository Layout

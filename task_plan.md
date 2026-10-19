@@ -10,7 +10,7 @@
 ## 2026-10-19 方法命名与服务器源码归档
 
 - [complete] 核对并同步服务器独有提交与未提交源码到本地，保留本地架构整理
-- [in_progress] 统一 ParamMem / ParamMem-DPO / ParamAgent 名称及兼容入口
-- [pending] 测试、同步来源记录与 Git 提交
+- [complete] 统一 ParamMem / ParamMem-DPO / ParamAgent 名称及兼容入口
+- [complete] 测试、同步来源记录与 Git 提交
 
 约束：不下载权重和数据，不覆盖服务器已有修改，不将未实现的在线路由器标为完成。

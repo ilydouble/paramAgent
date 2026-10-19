@@ -3,7 +3,7 @@
 #   ACTOR_MODEL="deepseek:deepseek-v4-flash-0731"   # aiaaa.cc relay
 #   ACTOR_MODEL="vllm:Qwen3.5-4B"
 #
-# Example — run ParamAgent with DeepSeek as the actor:
+# Example — run ParamMem / ParamMem-DPO with DeepSeek as the actor:
 #   ACTOR_MODEL="deepseek:deepseek-v4-flash-0731" bash qa/run_param_qa.sh
 set -e
 
@@ -28,18 +28,18 @@ echo "Actor model: $MODEL"
 DATASET_PATH="dataset/multihop/test/hotpot_qa.jsonl"
 INSIGHT_JSONL="generated_reflections/merged/sft/qa/hotpot_insights_qwen35_2b-merged.jsonl"
 
+METHOD="parammem"
+
 ARGS=(
-  --run_name "sft_hotpot_qwen3.5-4b"
-  --root_dir "results/qa/sft/"
+  --run_name "${METHOD}_hotpot"
+  --root_dir "results/qa/$METHOD/"
   --dataset_path "$DATASET_PATH"
   --strategy dot
   --language py
   --model "$MODEL"
   --pass_at_k 1
   --max_iters 6
-  --use_expert_module
-  --insight_json_path "$INSIGHT_JSONL"
   --device cuda:0
   --verbose
 )
-python qa/mainQA_parametric.py "${ARGS[@]}"
+python -m parammem.runner qa --method "$METHOD" --memory-file "$INSIGHT_JSONL" "${ARGS[@]}"

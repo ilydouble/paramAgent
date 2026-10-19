@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# This runs the math baselines and then ParamAgent if reflection data exists.
+# This runs the math baselines and then ParamMem if reflection data exists.
 
 cd "$(dirname "$0")/.."
 export PYTHONPATH=.
@@ -57,8 +57,8 @@ python math/mainMath.py \
 
 if [ -f "$REFLECTION_JSONL" ]; then
   python math/mainMath_param.py \
-    --run_name "paramagent_$MODEL" \
-    --root_dir "$ROOT_DIR/paramagent/" \
+    --run_name "parammem_$MODEL" \
+    --root_dir "$ROOT_DIR/parammem/" \
     --dataset_path "$DATASET_PATH" \
     --strategy dot \
     --language py \
@@ -70,6 +70,6 @@ if [ -f "$REFLECTION_JSONL" ]; then
     --device cuda:0 \
     --verbose
 else
-  echo "Skip ParamAgent because $REFLECTION_JSONL does not exist yet."
+  echo "Skip ParamMem because $REFLECTION_JSONL does not exist yet."
   echo "Run: bash math/infer_reflections_llama3_8b.sh"
 fi

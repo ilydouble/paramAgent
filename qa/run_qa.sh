@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# This runs the QA baselines and then ParamAgent if reflection data exists.
+# This runs the QA baselines and then ParamMem if reflection data exists.
 
 cd "$(dirname "$0")/.."
 export PYTHONPATH=.
@@ -63,8 +63,8 @@ python qa/mainQA.py \
 
 if [ -f "$REFLECTION_JSONL" ]; then
   python qa/mainQA_parametric.py \
-    --run_name "paramagent_$MODEL" \
-    --root_dir "$ROOT_DIR/paramagent/" \
+    --run_name "parammem_$MODEL" \
+    --root_dir "$ROOT_DIR/parammem/" \
     --dataset_path "$DATASET_PATH" \
     --strategy dot \
     --language py \
@@ -76,6 +76,6 @@ if [ -f "$REFLECTION_JSONL" ]; then
     --insight_json_path "$REFLECTION_JSONL" \
     --verbose
 else
-  echo "Skip ParamAgent because $REFLECTION_JSONL does not exist yet."
+  echo "Skip ParamMem because $REFLECTION_JSONL does not exist yet."
   echo "Run: bash qa/infer_reflections_llama3_8b.sh"
 fi

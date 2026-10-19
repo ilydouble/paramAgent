@@ -1,4 +1,4 @@
-"""SCORE offline paired-data entry point; not an online gated runner."""
+"""Compatibility alias for ParamAgent offline data tools."""
 from gain_router.paired import main
 
 if __name__ == "__main__":

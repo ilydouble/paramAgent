@@ -1,1 +1,1 @@
-"""Method-separated project entry points."""
+"""Legacy SCORE namespace; the canonical system name is ParamAgent."""

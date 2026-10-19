@@ -1,3 +1,5 @@
+> 名称迁移：本文档历史上无收益路由的 ParamAgent 现在称 ParamMem / ParamMem-DPO，按 SFT / DPO 记忆来源区分。完整 ParamAgent 包含收益路由器。参见 [当前方法架构](../docs/method_architecture.md)。
+
 ## 用sft微调后的qwen生成数据
 python math/gen_math_pitfalls_qwen35.py --test
 python math/gen_math_pitfalls_qwen35.py

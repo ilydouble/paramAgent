@@ -1,2 +1,2 @@
-"""Existing SCORE strategy execution implementations."""
-from gain_router.paired import execute_branch
+"""Compatibility alias for paramagent.policies."""
+from paramagent.policies import *  # noqa: F401,F403
