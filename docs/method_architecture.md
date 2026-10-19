@@ -1,6 +1,6 @@
 # 方法命名、代码入口与本地维护
 
-规范术语见 [CONTEXT.md](../CONTEXT.md)。仓库仍叫 ParamAgent，目录名不代表某次运行使用的实验方法。
+规范术语见 [CONTEXT.md](../CONTEXT.md)。模型底座、adapter 配对与重建来源见 [服务器模型索引](models/README.md)。仓库仍叫 ParamAgent，目录名不代表某次运行使用的实验方法。
 
 | 实验名称 | 主模型 | 记忆模型 | 收益路由 |
 | --- | --- | --- | --- |

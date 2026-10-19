@@ -1,0 +1,15 @@
+{
+  "status": "verified",
+  "base": "/root/autodl-tmp/lrr/ParamAgent/models/Qwen3.5-2B-code-merged2",
+  "adapter": "/root/autodl-tmp/lrr/ParamAgent/lora-qwen3.5-2b-dpo/lora-qwen3.5-2b-code2-dpo-20261003",
+  "model_class": "Qwen3_5ForCausalLM",
+  "adapter_sha256": "157b79bef5e5a7e499f67b025143a6d9c3c772292315f2f35111ddbf6baf77ff",
+  "tensor_count": 228,
+  "all_weights_finite": true,
+  "adapter_changes_logits_max_abs": 0.1875,
+  "smoke_generation": "<Pitfalls>:\n1. **Empty List** should return a specific value (e.g., `None` or raise an exception), not a number.\n2. **Single-Element List** should return that element, but the implementation must handle this case correctly.\n3. **Non-Integer Values** should be handled, as the function signature specifies `int`, but the input might not be strictly integers.\n4. **Negative Numbers** should be considered, as they can affect the maximum value.\n5. **Type Checking** should be performed to ensure the input is indeed a list of integers.\n6.",
+  "note": "Load and generation smoke check; not a quality evaluation.",
+  "formal_training_certified": false,
+  "split_audit_path": "/root/autodl-tmp/lrr/code2-dpo-run-20261003/split_audit.json",
+  "limitation": "Random DPO split overlaps frozen router validation/test groups. Model is operationally verified only."
+}

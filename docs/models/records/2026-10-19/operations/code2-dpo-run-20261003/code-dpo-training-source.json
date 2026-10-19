@@ -1,0 +1,8 @@
+{
+  "source": "local_git_object",
+  "git_blob": "526b58cbc27bd571bf4bd08715961828364fd411",
+  "sha256": "13bad8facad64037819590e19bef38546b95db1e96f2b1e65e57f6d52569bc3f",
+  "recorded_training_source_sha256": "13bad8facad64037819590e19bef38546b95db1e96f2b1e65e57f6d52569bc3f",
+  "current_training_source_sha256": "8456ee7ba1cd44a4de04a1b9a2b4a300eea9f18cfbfa12d4adb02f1ba9da928a",
+  "note": "Recovered the exact historical training source matching training_source.json. The current training file differs; use the historical source when investigating this run."
+}

@@ -7,3 +7,5 @@
 命名已统一：parammem.runner 区分 parammem / parammem-dpo，显式记忆文件；parammem.generate 共享原域生成代码。完整方法离线源码迁到 paramagent/data，gain_router 身份、score 入口和旧基线命令兼容。原 run_param_* 中 Code 默认 DPO，Math/QA 默认 SFT。未改变历史实验数据、权重或采样协议。QA SFT 生成 shell 原有尾部 Markdown 围栏导致语法错误，已去除。
 
 工作区规范：正式代码保留 ParamAgent 路径，论文为独立 paper_write 本地 Git 仓库。历史源码与传输包归 archive，项目总计划归 project_notes；实验输入/缓存/导出归 experiments/router_embedding3。移动清单和原文件备份在 project_notes/organization_20261019。
+
+模型来源事实：三域SFT来自公开固定revision底座加保留adapter重新合并，历史训练底座revision未核实。Code2 DPO是20261003新训练；旧Code30的merged3缺失，不可挂到Code2冒充恢复。Math/QA DPO3为保留adapter。Code2原训练源码SHA256已从Git blob526b58cbc27bd571bf4bd08715961828364fd411找回，区别于当前训练入口。完整说明见docs/models。

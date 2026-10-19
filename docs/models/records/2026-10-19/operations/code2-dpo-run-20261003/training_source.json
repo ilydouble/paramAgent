@@ -1,0 +1,7 @@
+{
+  "base_model": "/root/autodl-tmp/lrr/ParamAgent/models/Qwen3.5-2B-code-merged2",
+  "dataset": "/root/autodl-tmp/lrr/ParamAgent/dataset/code/train/dpo.jsonl",
+  "dataset_sha256": "3f58909c82a4efb9ecf5205e4d814d6d106f566b8423c4e5cdb2ac2f370ffb36",
+  "output": "/root/autodl-tmp/lrr/ParamAgent/lora-qwen3.5-2b-dpo/lora-qwen3.5-2b-code2-dpo-20261003",
+  "script_sha256": "13bad8facad64037819590e19bef38546b95db1e96f2b1e65e57f6d52569bc3f"
+}

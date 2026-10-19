@@ -1,0 +1,13 @@
+{
+  "metadata_hashes_verified": 34,
+  "registry_models": 17,
+  "selected_pairings_verified": 3,
+  "historical_training_source_sha256_verified": true,
+  "python_sources_parsed": 6,
+  "shell_sources_checked": 3,
+  "markdown_links_checked": true,
+  "weights_and_credentials_still_ignored": true,
+  "models_loaded": false,
+  "training_or_generation_run": false,
+  "large_weights_rehashed": false
+}

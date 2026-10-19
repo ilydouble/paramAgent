@@ -102,3 +102,12 @@ dist/
 *.egg-info/
 
 ._*
+
+# Versioned model documentation and small provenance records only
+!docs/models/
+!docs/models/**/
+!docs/models/**/*.md
+!docs/models/**/*.json
+!docs/models/**/*.py
+!docs/models/**/*.sh
+!docs/models/**/*.exit
