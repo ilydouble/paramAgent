@@ -13,7 +13,7 @@ ParamMem（SFT 2B）和 ParamMem-DPO（同一 SFT 底座加 DPO adapter）。
 - `parammem-dpo` 加载相同 SFT 模型和对应 DPO adapter，核对底座名称与登记的 adapter 哈希。
 - 记忆输入沿用 SFT 训练模板：Code 函数签名、Math 题目、QA 问题拆解及其既有示例。
   不使用 paired 的 task + current response 通用批评提示。
-- 沿用领域 runner 的采样温度；模型请求种子固定42，记忆输出上限3072。
+- 沿用领域 runner 的采样温度；同一请求首个样本种子42，重复采样依次43、44等，记忆输出上限3072。
   所有 actor 原始请求/响应、记忆输出、截断标志和评分记录保存在 `calls.jsonl`。
 - 小型 MiniLM 在 CPU 上做512-token截断、attention-mask均值池化和L2归一化。
   三组使用同一模型。各组的记忆库独立，从空库开始，仅加入该组生成的轨迹。
@@ -47,7 +47,11 @@ python scripts/run_parammem_pilot.py \
 ```
 
 身份文件固定输入、runner、harness和权重哈希；身份不同拒绝复用输出。
-每次调用追加并 fsync，重启时从日志恢复相同请求的输出。
+每次调用追加并 fsync，完整重放可从日志恢复相同请求及采样序号的输出。
+恢复时使用新输出目录，仅以旧 `calls.jsonl` 初始化缓存，不复用阶段结果；禁止原地续跑，
+避免原 runner 跳过阶段后无法还原采样次数和记忆库。
+`66c8e85` 及更早快照重复使用同题同温度记忆样本，只适合作为固定记忆消融；
+其首次作答可保留，多轮结果需用按序号采样版本重新验证。
 `completed.json` 仅在10题结果齐全且不存在未决评分后生成。
 最终结果读取 `second_stage_log.jsonl`；没有首阶段失败时读取 `first_stage_log.jsonl`。
 `results.jsonl` 是原 runner 的首阶段记录，不能用来统计检索阶段后的最终成绩。

@@ -11,6 +11,16 @@ spec.loader.exec_module(pilot)
 
 
 class PilotTests(unittest.TestCase):
+    def test_repeated_samples_have_distinct_reproducible_seeds(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = pilot.Journal(Path(directory))
+            request = {"seed": 42, "prompt": "same question", "temperature": 1.0}
+            self.assertEqual(journal.sample_request("memory", request)["seed"], 42)
+            self.assertEqual(journal.sample_request("memory", request)["seed"], 43)
+            self.assertEqual(journal.sample_request("actor", request)["seed"], 42)
+            self.assertEqual(journal.sample_request("memory", {**request, "prompt": "other"})["seed"], 42)
+            self.assertEqual(pilot.Journal(Path(directory)).sample_request("memory", request)["seed"], 42)
+
     def test_final_results_include_second_stage_recovery(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)

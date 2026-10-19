@@ -163,11 +163,20 @@ class Journal:
         self.directory = directory
         self.cache = {}
         self.context = {}
+        self.occurrences = collections.Counter()
         path = directory / "calls.jsonl"
         if path.exists():
             for value in read_rows(path):
                 if value.get("type") in {"actor", "memory"}:
                     self.cache[value["key"]] = value
+
+    def sample_request(self, kind, request):
+        # Repeated high-temperature draws are distinct samples, even when the
+        # text is identical. Fresh replay reproduces the same occurrence seeds.
+        key = (kind, digest(request))
+        occurrence = self.occurrences[key]
+        self.occurrences[key] += 1
+        return {**request, "seed": request["seed"] + occurrence}
 
     def write(self, value):
         with (self.directory / "calls.jsonl").open("a") as handle:
@@ -188,6 +197,7 @@ class LocalActor:
         payload = {"model": self.name, "messages": messages, "max_tokens": max_tokens,
                    "temperature": temperature, "top_p": 0.9, "n": num_comps,
                    "seed": self.args.seed, "chat_template_kwargs": {"enable_thinking": False}}
+        payload = self.journal.sample_request("actor", payload)
         key = digest(payload)
         cached = self.journal.cache.get(key)
         if cached is None:
@@ -242,6 +252,7 @@ class LocalMemory:
         messages = memory_messages(self.args.domain, question)
         request = {"messages": messages, "method": self.args.method,
                    "temperature": temperature, "max_tokens": 3072, "seed": self.args.seed}
+        request = self.journal.sample_request("memory", request)
         key = digest(request)
         if key in self.journal.cache:
             return self.journal.cache[key]["output"]
@@ -249,7 +260,7 @@ class LocalMemory:
         import torch
         from transformers import set_seed
         from gain_router.local_preference import generation_stop_ids, generation_finish
-        set_seed(self.args.seed)
+        set_seed(request["seed"])
         prompt = self.tokenizer.apply_chat_template(messages, tokenize=False,
             add_generation_prompt=True, enable_thinking=False)
         inputs = self.tokenizer(prompt, return_tensors="pt").to("cuda")
@@ -329,6 +340,8 @@ def make_executor(domain, journal):
 
 def run(args):
     args.output.mkdir(parents=True, exist_ok=True)
+    if (args.output / "results.jsonl").exists():
+        raise ValueError("Use a fresh output directory; seed only calls.jsonl for a full deterministic replay")
     rows = read_rows(args.dataset)
     if len(rows) != 10 or len({r["task_id"] for r in rows}) != 10:
         raise ValueError("Expected ten distinct frozen test rows")
@@ -336,6 +349,7 @@ def run(args):
         "method": args.method, "dataset_sha256": file_digest(args.dataset),
         "runner_sha256": file_digest(ROOT / RUNNERS[args.domain]), "adapter_sha256": None,
         "harness_sha256": file_digest(__file__), "seed": args.seed, "iterations": args.iterations,
+        "sampling": "seed plus occurrence of identical request; fresh full replay only",
         "feedback": "oracle diagnostic; HumanEval full tests / numeric Math equality / QA EM",
         "embedding": str(args.embedding_path), "embedding_max_tokens": 512,
         "actor_url": args.actor_url, "actor": "Qwen3.5-4B"}
