@@ -48,6 +48,17 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(pilot.clean_math(r"428\text{ square centimeters}"), "428")
         self.assertEqual(pilot.clean_math(r"90^\circ"), "90")
 
+    def test_latex_pi_constant_is_not_an_unknown_variable(self):
+        try:
+            import sympy
+            import antlr4
+            from executors.Math_executor import _extract_final_answer
+        except ImportError:
+            self.skipTest("Requires the server Math evaluation dependencies")
+        self.assertTrue(pilot.math_score(r"Answer: 256\pi", r"256 \pi")["success"])
+        self.assertFalse(pilot.math_score(r"Answer: 12\pi", r"256 \pi")["success"])
+        self.assertIsNone(pilot.math_score(r"Answer: x", "4")["success"])
+
     def test_journal_recovers_cached_calls_but_not_evaluations(self):
         with tempfile.TemporaryDirectory() as directory:
             journal = pilot.Journal(Path(directory))

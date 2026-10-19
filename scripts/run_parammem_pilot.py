@@ -117,7 +117,7 @@ def math_score(answer, gold):
     # Preserve the domain's brace-aware final-answer extraction. Only its remote
     # judge is replaced; unparseable expressions remain explicitly unresolved.
     from executors.Math_executor import _extract_final_answer
-    from sympy import simplify
+    from sympy import Symbol, pi, simplify
     from sympy.parsing.latex import parse_latex
     pred = clean_math(_extract_final_answer(answer) or answer)
     ref = clean_math(gold)
@@ -125,6 +125,10 @@ def math_score(answer, gold):
         return {"success": True, "prediction": pred, "status": "exact"}
     try:
         left, right = parse_latex(pred, strict=True), parse_latex(ref, strict=True)
+        # SymPy's LaTeX parser represents \pi as a free Symbol, not its
+        # mathematical constant. Resolve only this explicitly named constant.
+        left = left.subs(Symbol("pi"), pi)
+        right = right.subs(Symbol("pi"), pi)
         if left.free_symbols or right.free_symbols:
             raise ValueError("Scalar diagnostic received free symbols")
         delta = simplify(left - right)
