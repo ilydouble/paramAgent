@@ -55,4 +55,8 @@ python scripts/run_parammem_pilot.py \
 `completed.json.successes` 只统计首阶段，分析该快照时需按上述文件重新汇总。
 实验输入、权重、轨迹和结果不随源码提交。
 
-离线测试：`python -m unittest discover -s tests -p test_parammem_pilot.py -v`。
+九组全部完成并下载后，运行 `python scripts/summarize_parammem_pilot.py /path/to/experiment`，
+生成 `summary.json`。它按题配对首次作答、首阶段和最终结果，统计截断与生成token，
+检查缺失/重复题目、未重试失败题及 runner 捕获的异常；适用于早期快照。
+
+离线测试：`python -m unittest discover -s tests -p 'test_parammem_pilot*.py' -v`。
