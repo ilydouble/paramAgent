@@ -72,6 +72,9 @@ Actor通过同一vLLM服务的`/tokenize`按实际chat template精确计数；�
 `completed.json` 仅在10题结果齐全且不存在未决评分后生成。
 最终结果读取 `second_stage_log.jsonl`；没有首阶段失败时读取 `first_stage_log.jsonl`。
 `results.jsonl` 是原 runner 的首阶段记录，不能用来统计检索阶段后的最终成绩。
+默认每域严格校验10题。补充小样本诊断时，可在生成入口和汇总入口均显式提供
+`--expected-tasks 1`（每域1道、三域共3道），数量会写入运行身份；仍要求题目ID唯一、
+同域三组同题及完整两阶段结果。不重复填充题目凑数，不复用前次记忆库或响应缓存。
 首阶段失败但没有完成第二阶段的记录会阻止汇总。早期 `e21e0e1` 快照的
 `completed.json.successes` 只统计首阶段，分析该快照时需按上述文件重新汇总。
 实验输入、权重、轨迹和结果不随源码提交。

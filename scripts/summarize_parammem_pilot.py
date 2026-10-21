@@ -8,7 +8,9 @@ from pathlib import Path
 from run_parammem_pilot import read_rows, stage_results, qa_score
 
 
-def summarize(root):
+def summarize(root, expected_tasks=10):
+    if expected_tasks <= 0:
+        raise ValueError("Expected task count must be positive")
     groups, tasks = [], []
     for domain in ("code", "math", "qa"):
         for method in ("qwen", "parammem", "parammem-dpo"):
@@ -16,8 +18,8 @@ def summarize(root):
             if not (directory / "completed.json").exists():
                 raise RuntimeError(f"Run has not completed: {domain}/{method}")
             first, final = stage_results(directory)
-            if len(first) != 10:
-                raise RuntimeError(f"Expected ten tasks: {directory}")
+            if len(first) != expected_tasks:
+                raise RuntimeError(f"Expected {expected_tasks} tasks: {directory}")
             log = root / f"{domain}-{method}.log"
             if log.exists():
                 errors = [line for line in log.read_text().splitlines() if any(s in line for s in
@@ -78,15 +80,16 @@ def summarize(root):
                 regressed = [i for i, t in by_method["parammem-dpo"].items() if not t[stage] and by_method[control][i][stage]]
                 pairs.append({"domain": domain, "control": control, "stage": stage,
                               "dpo_improved": improved, "dpo_regressed": regressed})
-    return {"protocol": "oracle-feedback implementation diagnostic; 10 frozen tasks per domain",
+    return {"protocol": f"oracle-feedback implementation diagnostic; {expected_tasks} frozen tasks per domain",
             "groups": groups, "tasks": tasks, "dpo_pairs": pairs}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", type=Path)
+    parser.add_argument("--expected-tasks", type=int, default=10)
     args = parser.parse_args()
-    result = summarize(args.root)
+    result = summarize(args.root, args.expected_tasks)
     output = args.root / "summary.json"
     output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     for row in result["groups"]:

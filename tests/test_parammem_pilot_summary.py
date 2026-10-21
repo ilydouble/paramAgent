@@ -34,6 +34,16 @@ class SummaryTests(unittest.TestCase):
             (root / "code-qwen.log").write_text("Error in item 0: invalid execution")
             with self.assertRaisesRegex(RuntimeError, "Runner errors"):
                 summary.summarize(root)
+            (root / "code-qwen.log").write_text("")
+            with self.assertRaisesRegex(RuntimeError, "Expected 1 tasks"):
+                summary.summarize(root, expected_tasks=1)
+            for path in root.glob("results/*/*/*.jsonl"):
+                path.write_text(path.read_text().splitlines()[0] + "\n")
+            small = summary.summarize(root, expected_tasks=1)
+            self.assertEqual(len(small["tasks"]), 9)
+            self.assertTrue(all(group["n"] == 1 for group in small["groups"]))
+            with self.assertRaises(ValueError):
+                summary.summarize(root, expected_tasks=0)
 
 
 if __name__ == "__main__":

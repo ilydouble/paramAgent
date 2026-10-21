@@ -50,6 +50,13 @@ def read_rows(path):
     return [json.loads(s) for s in Path(path).read_text().splitlines() if s.strip()]
 
 
+def read_frozen_rows(path, expected_tasks=10):
+    rows = read_rows(path)
+    if expected_tasks <= 0 or len(rows) != expected_tasks or len({row["task_id"] for row in rows}) != expected_tasks:
+        raise ValueError(f"Expected {expected_tasks} distinct frozen test rows")
+    return rows
+
+
 def resolve_dpo_adapter(args):
     explicit = getattr(args, "dpo_adapter_path", None)
     expected = getattr(args, "expected_dpo_sha256", None)
@@ -426,13 +433,12 @@ def run(args):
     args.output.mkdir(parents=True, exist_ok=True)
     if (args.output / "results.jsonl").exists():
         raise ValueError("Use a fresh output directory; seed only calls.jsonl for a full deterministic replay")
-    rows = read_rows(args.dataset)
-    if len(rows) != 10 or len({r["task_id"] for r in rows}) != 10:
-        raise ValueError("Expected ten distinct frozen test rows")
+    rows = read_frozen_rows(args.dataset, args.expected_tasks)
     identity = {"protocol": "legacy_parammem_triad_diagnostic_v1", "domain": args.domain,
         "method": args.method, "dataset_sha256": file_digest(args.dataset),
         "runner_sha256": file_digest(ROOT / RUNNERS[args.domain]), "adapter_sha256": None,
         "harness_sha256": file_digest(__file__), "seed": args.seed, "iterations": args.iterations,
+        "expected_tasks": args.expected_tasks,
         "sampling": "seed plus occurrence of identical request; fresh full replay only",
         "feedback": "oracle diagnostic; HumanEval full tests / numeric Math equality / QA EM",
         "embedding": str(args.embedding_path), "embedding_max_tokens": 512,
@@ -481,11 +487,11 @@ def run(args):
            for c in read_rows(args.output / "calls.jsonl")):
         raise RuntimeError("Unresolved evaluations remain; run cannot be reported as complete")
     first, final = stage_results(args.output)
-    if len(final) != 10 or {r["task_id"] for r in final} != {r["task_id"] for r in rows}:
+    if len(final) != args.expected_tasks or {r["task_id"] for r in final} != {r["task_id"] for r in rows}:
         raise RuntimeError("Legacy runner produced incomplete or mismatched results")
     if any("is_solved" not in r for r in final):
         raise RuntimeError("Legacy result lacks is_solved")
-    summary = {"domain": args.domain, "method": args.method, "n": 10,
+    summary = {"domain": args.domain, "method": args.method, "n": args.expected_tasks,
                "stage1_successes": sum(bool(r["is_solved"]) for r in first),
                "successes": sum(bool(r["is_solved"]) for r in final),
                "calls": len(journal.cache), "identity": digest(identity)}
@@ -498,6 +504,7 @@ def main():
     parser.add_argument("--domain", choices=RUNNERS, required=True)
     parser.add_argument("--method", choices=["qwen", "parammem", "parammem-dpo"], required=True)
     parser.add_argument("--dataset", type=Path, required=True)
+    parser.add_argument("--expected-tasks", type=int, default=10)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model-root", type=Path, required=True)
     parser.add_argument("--dpo-adapter-path", type=Path)

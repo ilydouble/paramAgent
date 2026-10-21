@@ -16,6 +16,19 @@ spec.loader.exec_module(pilot)
 
 
 class PilotTests(unittest.TestCase):
+    def test_explicit_small_frozen_sample_preserves_count_and_uniqueness_guards(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "input.jsonl"
+            path.write_text(json.dumps({"task_id": "new-question"}) + "\n")
+            self.assertEqual(len(pilot.read_frozen_rows(path, 1)), 1)
+            with self.assertRaises(ValueError):
+                pilot.read_frozen_rows(path)
+            with self.assertRaises(ValueError):
+                pilot.read_frozen_rows(path, 0)
+            path.write_text(path.read_text() * 2)
+            with self.assertRaises(ValueError):
+                pilot.read_frozen_rows(path, 2)
+
     def budget_args(self, **overrides):
         return SimpleNamespace(**{"actor_url": "http://127.0.0.1:8000/v1", "actor_context_tokens": 16384,
                                   "math_answer_tokens": 8192, "context_reserve_tokens": 256, **overrides})
