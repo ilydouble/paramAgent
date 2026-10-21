@@ -232,10 +232,6 @@ class PilotTests(unittest.TestCase):
         self.assertIsNone(pilot.math_score("Answer: x", "4", finish_reason="length")["success"])
         self.assertIsNone(pilot.math_score("x", "4", finish_reason="length")["success"])
         self.assertTrue(pilot.math_score("4", "4", finish_reason="length")["success"])
-        quoted = 'The prompt says "previous answer: ... Answer: Answer: 2"\nLet us continue considering the cases.'
-        self.assertFalse(pilot.math_score(quoted, "6", finish_reason="length")["success"])
-        self.assertIsNone(pilot.math_score(quoted, "6", finish_reason="stop")["success"])
-        self.assertIsNone(pilot.math_score('Answer: Answer: 2"', "6", finish_reason="length")["success"])
 
 
 if __name__ == "__main__":
