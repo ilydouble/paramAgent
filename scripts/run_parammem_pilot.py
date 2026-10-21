@@ -9,7 +9,6 @@ It is an oracle-feedback diagnostic, not a router-training or blind benchmark.
 from __future__ import annotations
 
 import argparse
-import ast
 import collections
 import hashlib
 import importlib.util
@@ -103,24 +102,9 @@ def stage_results(directory):
     return first, final
 
 
-def literal_assignment(path, name):
-    for node in ast.parse(Path(path).read_text()).body:
-        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
-            return ast.literal_eval(node.value)
-    raise ValueError(f"Missing literal {name}: {path}")
-
-
 def memory_messages(domain, question):
-    stem = {"code": "Code", "math": "Math", "qa": "QA"}[domain]
-    path = ROOT / domain / f"LoRA_Qwen35_{stem}_4090.py"
-    system = literal_assignment(path, "SYSTEM_PROMPT")
-    if domain == "qa":
-        examples = literal_assignment(path, "PRE_INSIGHT_FEWSHOT")
-        user = f"Here are some examples:{examples}\n\n[Question]: {question}"
-    else:
-        marker = "FUNC_SIGNATURE" if domain == "code" else "PROBLEM"
-        user = f"{marker}:\n{question}"
-    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    from shared.parammem_prompts import memory_messages as author_messages
+    return author_messages(domain, question)
 
 
 def normalize_qa(value):
@@ -434,7 +418,9 @@ def run(args):
     if (args.output / "results.jsonl").exists():
         raise ValueError("Use a fresh output directory; seed only calls.jsonl for a full deterministic replay")
     rows = read_frozen_rows(args.dataset, args.expected_tasks)
-    identity = {"protocol": "legacy_parammem_triad_diagnostic_v1", "domain": args.domain,
+    identity = {"protocol": "legacy_parammem_triad_diagnostic_v1",
+                "memory_prompt_protocol": "parammem_author_8b36cdd_inference_qwen_no_thinking",
+                "domain": args.domain,
         "method": args.method, "dataset_sha256": file_digest(args.dataset),
         "runner_sha256": file_digest(ROOT / RUNNERS[args.domain]), "adapter_sha256": None,
         "harness_sha256": file_digest(__file__), "seed": args.seed, "iterations": args.iterations,

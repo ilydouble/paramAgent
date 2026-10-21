@@ -1928,8 +1928,7 @@ def generic_generate_mathqa_impl(
     math_pitfalls_instruction = (
         "You will be given a mathematics question, and will be provided with some potential mistakes and pitfalls about the queston. You will also possibly be given a demonstration of similar problems. "
         "Using the information provided, think step-by-step and then write a short answer to the question. "
-        "On the LAST line of your response, write ONLY the final answer, in the exact format **`Answer:`** <final answer> — no reasoning or extra text on that line. "
-        "❖ The final answer should be simplified to its simplest form, e.g., 25, 2516_8, \\frac{1}{36}, etc."
+        "❖ The final answer should be simplified to its simplest form,e.g., 25, 2516_8, \frac{1}{36}, etc."
     )
 
     # --- Chat models ---
@@ -2502,7 +2501,7 @@ def generic_generate_func_impl(
                     ),
                 ]
             else:
-                mistake_instructions = "You will be given a function signature and its docstring, along with a set of summary hints that highlight common pitfalls. Based on these hints, write a correct implementation of the function. You are an AI that responds only with Python code—no English. Restate the full function signature, and provide the complete implementation."
+                mistake_instructions = "You will be given a function signature and its docstring, along with a set of summary hints that highlight common pitfalls and several flawed implementation examples. Based on these hints and flawed examples, write a correct implementation of the function. You are an AI that responds only with Python code—no English. Restate the full function signature, and provide the complete implementation."
                 system_prompt = f"{mistake_instructions}\n{code_block_instruction}"
                 print_messages(system_prompt, func_sig)
                 messages = [

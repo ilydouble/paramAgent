@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/retrain_sft_dpo.py"
@@ -12,6 +13,19 @@ SPEC.loader.exec_module(retrain)
 
 
 class SFTLineageTests(unittest.TestCase):
+    def test_legacy_pairs_cannot_be_mistaken_for_paper_aligned_training(self):
+        with patch.object(retrain.sys, "argv", ["retrain_sft_dpo", "--repo-root", "/missing",
+                                               "--run-dir", "/missing-output", "--train"]), \
+             patch.object(retrain, "validate_sft") as validate, \
+             patch.object(retrain.subprocess, "run") as launch, \
+             patch.object(retrain.Path, "mkdir") as mkdir, \
+             patch("sys.stderr"):
+            with self.assertRaises(SystemExit):
+                retrain.main()
+        validate.assert_not_called()
+        launch.assert_not_called()
+        mkdir.assert_not_called()
+
     def fixture(self, root):
         base = root / "models/Qwen3.5-2B-code-merged2"
         base.mkdir(parents=True)

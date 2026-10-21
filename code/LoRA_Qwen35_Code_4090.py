@@ -2,7 +2,7 @@
 """Single-GPU QLoRA fine-tuning of Qwen/Qwen3.5-2B for code pitfalls.
 
 This script follows the same pattern as math/LoRA_Qwen35_Math_4090.py but
-adapted for the code domain using dataset/code/train/app.json.
+adapted for the code domain using complete author-style supervision targets.
 Qwen3.5 is a multimodal model, so it is loaded with AutoModelForMultimodalLM;
 the dataset itself only supplies text and does not train the vision encoder.
 """
@@ -11,11 +11,16 @@ from __future__ import annotations
 
 import argparse
 import inspect
+import math
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from shared.parammem_prompts import author_constants, tokenize_sft
 
 import torch
 from datasets import Dataset
@@ -29,10 +34,7 @@ from transformers import (
     TrainingArguments,
 )
 
-SYSTEM_PROMPT = (
-    "You are an AI assistant in coding. "
-    "Given a Python function signature and docstring, list potential pitfalls."
-)
+SYSTEM_PROMPT, _ = author_constants("code", "train")
 
 
 class DynamicCausalLMCollator:
@@ -58,20 +60,21 @@ class DynamicCausalLMCollator:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="QLoRA fine-tune Qwen3.5-2B on code pitfalls")
     parser.add_argument("--dataset_path", default="dataset/code/train/code.json")
-    parser.add_argument("--output_dir", default="./lora-qwen3.5-2b/lora-qwen3.5-2b-code3")
+    parser.add_argument("--dataset2_path", default=None)
+    parser.add_argument("--output_dir", default="./lora-qwen3.5-2b/lora-qwen3.5-2b-code-author-sft")
     parser.add_argument("--base_model", default="Qwen/Qwen3.5-2B")
     parser.add_argument("--num_epochs", type=float, default=3)
-    parser.add_argument("--per_device_batch_size", type=int, default=2)
-    parser.add_argument("--grad_accum_steps", type=int, default=8)
-    parser.add_argument("--lr", type=float, default=2e-4)
+    parser.add_argument("--per_device_batch_size", type=int, default=1)
+    parser.add_argument("--grad_accum_steps", type=int, default=96)
+    parser.add_argument("--lr", type=float, default=3e-5)
     parser.add_argument("--max_seq_len", type=int, default=2048)
     parser.add_argument(
         "--dynamic_padding",
         action="store_true",
         help="Experimental: pad each batch to its longest sequence.",
     )
-    parser.add_argument("--lora_r", type=int, default=32)
-    parser.add_argument("--lora_alpha", type=int, default=64)
+    parser.add_argument("--lora_r", type=int, default=64)
+    parser.add_argument("--lora_alpha", type=int, default=32)
     parser.add_argument("--lora_dropout", type=float, default=0.05)
     parser.add_argument("--warmup_ratio", type=float, default=0.03)
     parser.add_argument("--bf16", action="store_true", default=True)
@@ -80,8 +83,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no_tf32", dest="tf32", action="store_false")
     parser.add_argument("--save_steps", type=int, default=200)
     parser.add_argument("--resume_from_checkpoint", default=None, help="Path to a checkpoint directory to resume training from")
-    parser.add_argument("--val_ratio", type=float, default=0.05)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--val_ratio", type=float, default=0.15)
+    parser.add_argument("--seed", type=int, default=1)
     return parser.parse_args()
 
 
@@ -114,13 +117,13 @@ def load_code_examples(path: str) -> list[dict[str, str]]:
             raise ValueError(f"Dataset entry {index} must be a dict.")
         if not (item.get("func_sign") or item.get("prompt")):
             raise ValueError(f"Dataset entry {index} must contain non-empty 'func_sign' or 'prompt'.")
-        func_sign = _normalize_func_sign(item)
-        if "pitfalls" in item and str(item.get("pitfalls", "")).strip():
-            answer = str(item["pitfalls"]).lstrip(":\n ")
-        elif "raw_texts" in item:
+        func_sign = str(item.get("func_sign") or item["prompt"]).strip()
+        if "raw_texts" in item:
             answer = str(item["raw_texts"])
         elif "raw_text" in item:
             answer = str(item["raw_text"])
+        elif "pitfalls" in item:
+            answer = str(item["pitfalls"])
         else:
             raise ValueError(f"Dataset entry {index} must have 'pitfalls', 'raw_texts', or 'raw_text'.")
         examples.append({"func_sign": func_sign, "answer": answer})
@@ -175,8 +178,7 @@ def main() -> None:
     torch.backends.cuda.matmul.allow_tf32 = args.tf32
     processor = AutoProcessor.from_pretrained(args.base_model)
     tokenizer = processor.tokenizer
-    if tokenizer.pad_token_id is None:
-        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
 
     bnb_config = BitsAndBytesConfig(
@@ -210,40 +212,20 @@ def main() -> None:
     model.config.use_cache = False
     model.print_trainable_parameters()
 
-    data = Dataset.from_list(load_code_examples(args.dataset_path)).shuffle(seed=args.seed)
+    examples = load_code_examples(args.dataset_path)
+    if args.dataset2_path and args.dataset2_path.lower() != "none":
+        examples.extend(load_code_examples(args.dataset2_path))
+    data = Dataset.from_list(examples).shuffle(seed=args.seed)
     split = data.train_test_split(test_size=args.val_ratio, seed=args.seed)
 
     def tokenize(example: dict[str, Any]) -> dict[str, list[int]]:
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"FUNC_SIGNATURE:\n{example['func_sign']}"},
-        ]
-        prompt = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        answer = example["answer"].strip() + tokenizer.eos_token
-        prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
-        answer_ids = tokenizer(answer, add_special_tokens=False)["input_ids"]
-        input_ids = (prompt_ids + answer_ids)[: args.max_seq_len]
-        labels = ([-100] * len(prompt_ids) + answer_ids)[: args.max_seq_len]
-        attention_mask = [1] * len(input_ids)
-        result = {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "labels": labels,
-        }
-        if args.dynamic_padding:
-            result["length"] = len(input_ids)
-        else:
-            pad = args.max_seq_len - len(input_ids)
-            if pad > 0:
-                result["input_ids"] += [tokenizer.pad_token_id] * pad
-                result["attention_mask"] += [0] * pad
-                result["labels"] += [-100] * pad
-        return result
+        return tokenize_sft(processor, tokenizer, "code", example["func_sign"],
+                            example["answer"], args.max_seq_len, args.dynamic_padding)
 
     train_data = split["train"].map(tokenize, remove_columns=split["train"].column_names)
     eval_data = split["test"].map(tokenize, remove_columns=split["test"].column_names)
 
-    warmup_steps = int(args.warmup_ratio * len(train_data) / (args.per_device_batch_size * args.grad_accum_steps))
+    warmup_steps = math.ceil(args.warmup_ratio * math.ceil(len(train_data) / (args.per_device_batch_size * args.grad_accum_steps)) * args.num_epochs)
     print(f"Computed warmup_steps={warmup_steps} from warmup_ratio={args.warmup_ratio}")
 
     training_kwargs: dict[str, Any] = {
@@ -257,13 +239,13 @@ def main() -> None:
         "warmup_steps": warmup_steps,
         "bf16": args.bf16,
         "tf32": args.tf32,
-        "optim": "paged_adamw_8bit",
-        "logging_steps": 5,
-        "save_strategy": "steps",
+        "optim": "adamw_torch",
+        "logging_steps": 2,
+        "save_strategy": "epoch",
         "save_steps": args.save_steps,
-        "eval_strategy": "steps",
+        "eval_strategy": "epoch",
         "eval_steps": args.save_steps,
-        "save_total_limit": 3,
+        "save_total_limit": 4,
         "load_best_model_at_end": True,
         "metric_for_best_model": "eval_loss",
         "greater_is_better": False,

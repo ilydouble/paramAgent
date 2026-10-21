@@ -17,11 +17,16 @@ Example:
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
 import hashlib
 import json
 import os
 import re
 from typing import Any, Iterable, List, Tuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from shared.parammem_prompts import author_constants, memory_messages
 
 import torch
 import jsonlines
@@ -33,20 +38,7 @@ from transformers import (
     BitsAndBytesConfig,
 )
 
-SYSTEM_PROMPT = (
-    "You are an AI assistant specialized in mathematics education. "
-    "Given a math problem, identify and explain the common mistakes and pitfalls "
-    "students might encounter when solving it.\n\n"
-    "[Example]\n"
-    "Problem: Find the value of x in the equation 2x + 5 = 13.\n"
-    "\n"
-    "[Pitfalls]:\n"
-    "1. **Incorrect order of operations** — subtracting 5 before dividing by 2.\n"
-    "2. **Sign errors** — forgetting to change signs when moving terms across the equals sign.\n"
-    "3. **Arithmetic mistakes** — miscalculating 13 - 5 or dividing incorrectly.\n"
-    "\n"
-    "Now, list potential pitfalls for the following problem:"
-)
+SYSTEM_PROMPT, _ = author_constants("math", "inference")
 
 IM_START = "<|im_start|>"
 IM_END = "<|im_end|>"
@@ -97,11 +89,8 @@ def filter_pending_samples(data: List[dict], completed: set, prompt_key: str) ->
 
 
 def format_prompt(processor: AutoProcessor, problem: str) -> str:
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": f"PROBLEM:\n{problem.strip()}"},
-    ]
-    return processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
+    return processor.apply_chat_template(memory_messages("math", problem), tokenize=False,
+                                         add_generation_prompt=True, enable_thinking=False)
 
 
 def read_json(path: str) -> List[dict]:

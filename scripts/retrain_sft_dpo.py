@@ -136,8 +136,14 @@ def main():
     parser.add_argument("--repo-root", type=Path, required=True)
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--train", action="store_true")
+    parser.add_argument("--allow-legacy-question-only", action="store_true",
+                        help="Explicitly reproduce legacy text-pair training, not the ICASSP execution-grounded protocol")
     parser.add_argument("--verify-domain", choices=tuple(DOMAINS))
     args = parser.parse_args()
+    if args.train and not args.allow_legacy_question_only:
+        parser.error("This launcher consumes legacy question-only preference pairs. "
+                     "ICASSP requires failed traces, four guidance candidates and frozen-Actor execution evidence. "
+                     "It cannot be used for paper-aligned DPO; --allow-legacy-question-only is only for historical reproduction.")
     repo, run_dir = args.repo_root.resolve(), args.run_dir.resolve()
     source = Path(__file__).resolve().parents[1]
     if args.verify_domain:
@@ -157,7 +163,9 @@ def main():
             record.update({"command": command, "dataset_sha256": sha256(repo / "dataset" / dataset_name / "train/dpo.jsonl"),
                            "source_sha256": {str(path.relative_to(source)): sha256(path) for path in
                                (source / domain / f"LoRA_Qwen35_{label}_DPO_4090.py",
-                                source / domain / f"LoRA_Qwen35_{label}_4090.py", Path(__file__))},
+                                source / domain / f"LoRA_Qwen35_{label}_4090.py",
+                                source / "shared/parammem_prompts.py",
+                                source / domain / f"LoRA_Llama3_{label}_multigpu.py", Path(__file__))},
                            "reference": "frozen SFT base with new DPO adapter disabled"})
             save_json(domain_dir / "training_source.json", record)
             print(f"SFT_VERIFIED {domain}: {record['base_model']}", flush=True)

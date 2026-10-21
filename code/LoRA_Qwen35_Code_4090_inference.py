@@ -17,11 +17,16 @@ Example:
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
 import hashlib
 import json
 import os
 import re
 from typing import Any, Iterable, List, Tuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from shared.parammem_prompts import author_constants, memory_messages
 
 import torch
 import jsonlines
@@ -35,28 +40,7 @@ from transformers import (
     BitsAndBytesConfig,
 )
 
-SYSTEM_PROMPT = (
-    "You are an AI assistant in coding. "
-    "Given a Python function signature and docstring, list potential pitfalls.\n\n"
-    "[Example]\n"
-    "def longest_subarray_with_sum_limit(nums: List[int], target: int) -> List[int]:\n"
-    "    \"\"\"\n"
-    "    Return the longest **contiguous** subarray of `nums` whose elements sum to at most `target`.\n"
-    "\n"
-    "    • If several subarrays tie for maximum length, return the **left‑most**.\n"
-    "    • If no valid subarray exists, return the empty list `[]`.\n"
-    "    • The input may contain negative as well as positive integers.\n"
-    "\n"
-    "    Complexity requirements: time O(n), auxiliary space O(1).\n"
-    "    \"\"\"\n"
-    "\n"
-    "[Pitfalls]:\n"
-    "1. **No‑solution case** — must return `[]`, not `[x]` or `None`.\n"
-    "2. **Length update rule** — use strictly greater (`>`); otherwise, a later equal‑length window overwrites the earlier left‑most one.\n"
-    "3. **Negatives in the window** — shrinking only while `current_sum > target` can leave an over‑target sum if later negatives cancel it.\n"
-    "\n"
-    "Now, list potential pitfalls for the following question:"
-)
+SYSTEM_PROMPT, _ = author_constants("code", "inference")
 
 IM_START = "<|im_start|>"
 IM_END = "<|im_end|>"
@@ -108,11 +92,8 @@ def filter_pending_samples(data: List[dict], completed: set, prompt_key: str) ->
 
 
 def format_prompt(processor: AutoProcessor, func_sign: str) -> str:
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": f"FUNC_SIGNATURE:\n{func_sign.strip()}"},
-    ]
-    return processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
+    return processor.apply_chat_template(memory_messages("code", func_sign), tokenize=False,
+                                         add_generation_prompt=True, enable_thinking=False)
 
 
 def read_json(path: str) -> List[dict]:
@@ -212,26 +193,7 @@ def load_model(
     return processor, model, input_device
 
 
-def _keep_only_pitfalls(text: str) -> str:
-    """Drop any flawed-implementations tail from a generation.
 
-    The pitfalls-only prompt may still elicit a flawed-implementations section
-    because the fine-tuned model's training distribution is pitfalls + flawed
-    impl. We keep everything up to (but not including) the flawed section, so
-    the stored pitfall text never carries implementation code.
-    """
-    t = text.strip()
-    markers = [
-        "<Flawed Implementations>",
-        "[Flawed Implementations]:",
-        "[Flawed Implementations]",
-        "<Flawed Implementations>:",
-    ]
-    for marker in markers:
-        idx = t.find(marker)
-        if idx != -1:
-            return t[:idx].strip()
-    return t
 
 
 def extract_assistant_reply(text: str) -> str:
@@ -343,7 +305,7 @@ def process_data(
                 grouped[owner_idx].append(text)
 
             for item, gens in zip(chunk, grouped):
-                cleaned = [_keep_only_pitfalls(g) for g in gens]
+                cleaned = [generation.strip() for generation in gens]
                 item[args.output_key] = cleaned if args.num_versions > 1 else cleaned[0]
                 # Compatibility alias: downstream dot consumers read `pitfall`,
                 # not `high_temp_pitfall`. Mirror the Llama3 script behavior.

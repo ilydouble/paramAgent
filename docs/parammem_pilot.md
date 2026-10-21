@@ -11,7 +11,8 @@ ParamMem（SFT 2B）和 ParamMem-DPO（同一 SFT 底座加 DPO adapter）。
   不把该组的多轮最终结果叫作零样本 Base。
 - `parammem` 加载经核查的领域 SFT 合并模型。
 - `parammem-dpo` 加载相同 SFT 模型和对应 DPO adapter，核对底座名称与登记的 adapter 哈希。
-- 记忆输入沿用 SFT 训练模板：Code 函数签名、Math 题目、QA 问题拆解及其既有示例。
+- 记忆输入采用固定作者 8b36cdd 的批量推理模板：Code 函数签名、Math 题目及各自示例，QA 问题及原始两个示例。
+  作者训练模板与推理模板分开保留，来源哈希由 `shared/parammem_prompts.py` 校验。
   不使用 paired 的 task + current response 通用批评提示。
 - 沿用领域 runner 的采样温度；同一请求首个样本种子42，重复采样依次43、44等，记忆输出上限3072。
   记忆采样仅在隔离的 PyTorch RNG 上设置种子，不重置 runner 的 Python/NumPy 搜索状态。
@@ -20,6 +21,9 @@ ParamMem（SFT 2B）和 ParamMem-DPO（同一 SFT 底座加 DPO adapter）。
   三组使用同一模型。各组的记忆库独立，从空库开始，仅加入该组生成的轨迹。
 
 ## 评分与限制
+
+这次源码对齐不改写 ec93a65 或更早的实验归档，也不把旧 DPO 权重认证为 SCORE 协议。
+训练数据、流程与偏好证据尚未完整对齐，见 `docs/models/paper-protocol-alignment.md`。
 
 本诊断显式替换原代码中 Math/QA 的外部 GPT 等价性裁判：HumanEval 使用完整官方测试，
 Math 使用末答案抽取、单位清理及 SymPy LaTeX 数值等价，QA 使用标准化 EM 并记录 F1。

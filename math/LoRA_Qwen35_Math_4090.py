@@ -11,10 +11,15 @@ from __future__ import annotations
 
 import argparse
 import inspect
+import math
 import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from shared.parammem_prompts import author_constants, tokenize_sft
 
 import torch
 from datasets import Dataset
@@ -29,10 +34,7 @@ from transformers import (
 )
 
 
-SYSTEM_PROMPT = (
-    "You are a mathematics education assistant. Given a math problem, identify "
-    "and clearly explain common mistakes and pitfalls students may encounter."
-)
+SYSTEM_PROMPT, _ = author_constants("math", "train")
 
 
 class DynamicCausalLMCollator:
@@ -58,20 +60,20 @@ class DynamicCausalLMCollator:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="QLoRA fine-tune Qwen3.5-2B on math pitfalls")
     parser.add_argument("--dataset_path", default="dataset/math/math.json")
-    parser.add_argument("--output_dir", default="./lora-qwen3.5-2b-math")
+    parser.add_argument("--output_dir", default="./lora-qwen3.5-2b/lora-qwen3.5-2b-math-author-sft")
     parser.add_argument("--base_model", default="Qwen/Qwen3.5-2B")
-    parser.add_argument("--num_epochs", type=float, default=3)
-    parser.add_argument("--per_device_batch_size", type=int, default=2)
-    parser.add_argument("--grad_accum_steps", type=int, default=8)
-    parser.add_argument("--lr", type=float, default=2e-4)
+    parser.add_argument("--num_epochs", type=float, default=2)
+    parser.add_argument("--per_device_batch_size", type=int, default=1)
+    parser.add_argument("--grad_accum_steps", type=int, default=128)
+    parser.add_argument("--lr", type=float, default=1.5e-5)
     parser.add_argument("--max_seq_len", type=int, default=2048)
     parser.add_argument(
         "--dynamic_padding",
         action="store_true",
         help="Experimental: pad each batch to its longest sequence. Disabled by default for Qwen3.5 fallback-kernel stability.",
     )
-    parser.add_argument("--lora_r", type=int, default=32)
-    parser.add_argument("--lora_alpha", type=int, default=64)
+    parser.add_argument("--lora_r", type=int, default=64)
+    parser.add_argument("--lora_alpha", type=int, default=32)
     parser.add_argument("--lora_dropout", type=float, default=0.05)
     parser.add_argument("--warmup_ratio", type=float, default=0.03)
     parser.add_argument("--bf16", action="store_true", default=True)
@@ -80,8 +82,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no_tf32", dest="tf32", action="store_false")
     parser.add_argument("--save_steps", type=int, default=200)
     parser.add_argument("--resume_from_checkpoint", default=None, help="Path to a checkpoint directory to resume training from")
-    parser.add_argument("--val_ratio", type=float, default=0.05)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--val_ratio", type=float, default=0.15)
+    parser.add_argument("--seed", type=int, default=1)
     return parser.parse_args()
 
 
@@ -152,8 +154,7 @@ def main() -> None:
     torch.backends.cuda.matmul.allow_tf32 = args.tf32
     processor = AutoProcessor.from_pretrained(args.base_model)
     tokenizer = processor.tokenizer
-    if tokenizer.pad_token_id is None:
-        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
 
     bnb_config = BitsAndBytesConfig(
@@ -191,34 +192,8 @@ def main() -> None:
     split = data.train_test_split(test_size=args.val_ratio, seed=args.seed)
 
     def tokenize(example: dict[str, Any]) -> dict[str, list[int]]:
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"PROBLEM:\n{example['problem']}"},
-        ]
-        # Use Qwen's own template; do not carry over Llama's [INST] markers.
-        prompt = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        answer = example["pitfalls"].strip() + tokenizer.eos_token
-        prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
-        answer_ids = tokenizer(answer, add_special_tokens=False)["input_ids"]
-        input_ids = (prompt_ids + answer_ids)[: args.max_seq_len]
-        labels = ([-100] * len(prompt_ids) + answer_ids)[: args.max_seq_len]
-        attention_mask = [1] * len(input_ids)
-        result = {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "labels": labels,
-        }
-        if args.dynamic_padding:
-            # The collator pads per batch. This is optional because the Qwen3.5
-            # PyTorch fallback kernel can be unstable with variable lengths.
-            result["length"] = len(input_ids)
-        else:
-            pad = args.max_seq_len - len(input_ids)
-            if pad > 0:
-                result["input_ids"] += [tokenizer.pad_token_id] * pad
-                result["attention_mask"] += [0] * pad
-                result["labels"] += [-100] * pad
-        return result
+        return tokenize_sft(processor, tokenizer, "math", example["problem"],
+                            example["pitfalls"], args.max_seq_len, args.dynamic_padding)
 
     train_data = split["train"].map(tokenize, remove_columns=split["train"].column_names)
     eval_data = split["test"].map(tokenize, remove_columns=split["test"].column_names)
@@ -227,7 +202,7 @@ def main() -> None:
     # the same TrainingArguments keywords (notably warmup_ratio and the name of
     # the evaluation strategy). Keep the QLoRA settings while filtering only
     # unsupported optional keywords instead of failing before training starts.
-    warmup_steps = int(args.warmup_ratio * len(train_data) / (args.per_device_batch_size * args.grad_accum_steps))
+    warmup_steps = math.ceil(args.warmup_ratio * math.ceil(len(train_data) / (args.per_device_batch_size * args.grad_accum_steps)) * args.num_epochs)
     print(f"Computed warmup_steps={warmup_steps} from warmup_ratio={args.warmup_ratio}")
 
     training_kwargs: dict[str, Any] = {
@@ -241,13 +216,13 @@ def main() -> None:
         "warmup_steps": warmup_steps,
         "bf16": args.bf16,
         "tf32": args.tf32,
-        "optim": "paged_adamw_8bit",
-        "logging_steps": 5,
-        "save_strategy": "steps",
+        "optim": "adamw_torch",
+        "logging_steps": 2,
+        "save_strategy": "epoch",
         "save_steps": args.save_steps,
-        "eval_strategy": "steps",
+        "eval_strategy": "epoch",
         "eval_steps": args.save_steps,
-        "save_total_limit": 3,
+        "save_total_limit": 4,
         "load_best_model_at_end": True,
         "metric_for_best_model": "eval_loss",
         "greater_is_better": False,

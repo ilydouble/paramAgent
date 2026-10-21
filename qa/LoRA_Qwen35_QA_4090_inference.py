@@ -24,11 +24,16 @@ Example (with merged model):
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
 import hashlib
 import json
 import os
 import re
 from typing import Any, Iterable, List, Tuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from shared.parammem_prompts import author_constants, memory_messages
 
 import torch
 import jsonlines
@@ -42,81 +47,9 @@ from transformers import (
     BitsAndBytesConfig,
 )
 
-SYSTEM_PROMPT = (
-    "You will be given a question. Use your knowledge to extract the key point, "
-    "the underlying intent, and possible inference patterns needed to answer the question."
-)
+SYSTEM_PROMPT, PRE_INSIGHT_FEWSHOT = author_constants("qa", "inference")
 
-PRE_INSIGHT_FEWSHOT = """
-<Example 1>
-q: Anatoly Maltsev and Valentin Turchin were both from Russia, which of the two is known for his work as a mathematician?
 
-Question Parsing and Intent Extraction
-Intent:
---------------------------------------------------------------------------------
-🔍 Key Components
-1. Entity A:
-- **Anatoly Maltsev** — mathematician and logician known for contributions in mathematical logic and abstract algebra
-2. Entity B:
-- **Valentin Turchin** — computer scientist and philosopher known for work in cybernetics and philosophy of science
-3. Implied Relationship:
-- Comparative inquiry: which individual is more closely associated with the domain of mathematics
-4. Answer Type Expected:
-- Person name (e.g., "Anatoly Maltsev")
-5. Reasoning Type:
-- Comparative factual reasoning
-6. Required Background:
-- Biographical knowledge or retrieved professional profiles
---------------------------------------------------------------------------------
-🧠 Inference Trace
-1. Retrieve factual data about Maltsev and Turchin's academic domains.
-2. Classify Maltsev as a mathematician based on core contributions to mathematical logic.
-3. Classify Turchin as mainly working in cybernetics and philosophy.
-4. Eliminate Turchin as primary mathematician.
-5. Conclude Maltsev is the individual known for mathematics.
---------------------------------------------------------------------------------
-📝 Disambiguation Note
-- Nationality (Russia) does not help differentiate them.
-
-<Example 2>
-The Last Girl on Earth was the third concert tour by Barbadian recording artist Rihanna, the tour visited Europe, Asia, North America and Australia to support her fourth studio album, which 2009 , and fourth studio album by Barbadian singer Rihanna, and released on November 20, 2009 by Def Jam Recordings and SRP Records?
-
-### Question Parsing and Intent Extraction
-
-**Intent:**
---------------------------------------------------------------------------------
-🔍 **Key Components**
-1. **Entity A**:
-   - *The Last Girl on Earth* — Rihanna's third concert tour, associated with promoting a studio album
-
-2. **Entity B**:
-   - *Fourth studio album* by Rihanna — referenced multiple times, released in 2009
-
-3. **Key Relationship / Constraint**:
-   - Identify the name of Rihanna's **fourth studio album**, which was released on **November 20, 2009**, and **supported by** her third concert tour, *The Last Girl on Earth*
-
-4. **Answer Type Expected**:
-   - Album title (e.g., *Rated R*)
-
-5. **Reasoning Type**:
-   - Factual entity retrieval based on event-album association and release date
-
-6. **Required Background**:
-   - Rihanna's discography: album release dates and which albums were promoted during which concert tours
-
---------------------------------------------------------------------------------
-
-🧠 **Inference Trace**
-- Determine the name of Rihanna's **fourth studio album**
-- Confirm that this album was released on **November 20, 2009**
-- Verify that this album was the basis for the **"The Last Girl on Earth"** tour
-- Conclude that the album is **Rated R**
-
---------------------------------------------------------------------------------
-
-📝 **Disambiguation Note**
-- Although the question includes fragmented/redundant phrasing, the focus is clear: determine the album that matches both the **release date** and **tour association**
-"""
 
 IM_START = "<|im_start|>"
 IM_END = "<|im_end|>"
@@ -165,15 +98,8 @@ def filter_pending_samples(data: List[dict], completed: set, prompt_key: str) ->
 
 
 def format_prompt(processor: AutoProcessor, question: str) -> str:
-    user_content = (
-        f"Here are some examples:{PRE_INSIGHT_FEWSHOT}\n\n"
-        f"[Question]: {question.strip()}"
-    )
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_content},
-    ]
-    return processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
+    return processor.apply_chat_template(memory_messages("qa", question), tokenize=False,
+                                         add_generation_prompt=True, enable_thinking=False)
 
 
 def read_json(path: str) -> List[dict]:

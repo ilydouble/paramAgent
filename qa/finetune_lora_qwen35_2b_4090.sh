@@ -10,20 +10,20 @@ export TOKENIZERS_PARALLELISM=false
 
 python qa/LoRA_Qwen35_QA_4090.py \
   --dataset_path dataset/multihop/train/sft.jsonl \
-  --output_dir ./lora-qwen3.5-2b/lora-qwen3.5-2b-qa \
+  --output_dir ./lora-qwen3.5-2b/lora-qwen3.5-2b-qa-author-sft \
   --base_model ./models/Qwen3.5-2B \
-  --num_epochs 2 \
-  --per_device_batch_size 2 \
-  --grad_accum_steps 8 \
-  --lr 2e-4 \
-  --lora_r 32 \
-  --lora_alpha 64 \
+  --num_epochs 3 \
+  --per_device_batch_size 1 \
+  --grad_accum_steps 96 \
+  --lr 3e-5 \
+  --lora_r 64 \
+  --lora_alpha 32 \
   --lora_dropout 0.05 \
   --warmup_ratio 0.03 \
   --save_steps 200 \
   --max_seq_len 2048 \
-  --val_ratio 0.05 \
-  --seed 42
+  --val_ratio 0.15 \
+  --seed 1
 
 
 # # 断了之后，找到最新的 checkpoint 目录

@@ -21,10 +21,9 @@ from tenacity import (
 MATH_SIMPLE_CHAT_INSTRUCTION = (
     "You are an AI agent specialised in solving mathematics problems. "
     "A user will provide a single question.\n\n"
-    "❖ Think step-by-step.\n"
-    "❖ On the LAST line of your response, write ONLY the final answer, in the "
-    "exact format **`Answer:`** <final answer> — no reasoning or extra text on that line.\n"
-    "❖ The final answer should be simplified to its simplest form, e.g., 25, 2516_8, \\frac{1}{36}, etc.\n"
+    "❖ Think step‑by‑step, "
+    "then, on a new line, prefix the final result with **`Answer:`**.\n"
+    "❖ The final answer should be simplified to its simplest form,e.g., 25, 2516_8, \frac{1}{36}, etc."
     "❖ Do **not** include citations."
 )
 
@@ -33,25 +32,23 @@ MATH_REFLEXION_CHAT_INSTRUCTION = (
     "You are revising your previous answer to a mathematics problem. You will "
     "receive: (1) the original *question*, (2) your *last answer*, (3) *feedback* "
     "(Right or Wrong) explaining why that answer was unsatisfactory, and (4) your brief "
-    "*self-reflection* on the mistake.\n\n"
+    "*self‑reflection* on the mistake.\n\n"
     "Produce a revised response with the following format:\n"
-    "1. **Reasoning**: step-by-step thoughts correcting the error.\n"
-    "2. On the LAST line, write ONLY the final answer, in the exact format "
-    "**`Answer:`** <final answer> — no reasoning or extra text on that line.\n"
-    "❖ The final answer should be simplified to its simplest form, e.g., 25, 2516_8, \\frac{1}{36}, etc.\n"
-    "❖ Do not add citations."
+    "1. **Reasoning**: step‑by‑step thoughts correcting the error.\n"
+    "2. **Answer:** the final result on its own line.\n"
+    "❖ The final answer should be simplified to its simplest form,e.g., 25, 2516_8, \frac{1}{36}, etc."
+    "Do not add citations."
 )
 
 MATH_REFLEXION_CHAT_INSTRUCTION_PARAMETRIC = (
     "You are revising your previous answer to a mathematics problem. You will "
     "receive: (1) the original *question*, (2) potential mistakes and pitfalls, "
     "(3) your *last answer*, (4) *feedback* (Right or Wrong) explaining why that answer was unsatisfactory, and (5) your brief "
-    "*self-reflection* on the mistake.\n\n"
+    "*self‑reflection* on the mistake.\n\n"
     "Respond with:\n"
-    "1. **Reasoning**: updated step-by-step thoughts.\n"
-    "2. On the LAST line, write ONLY the final answer, in the exact format "
-    "**`Answer:`** <final answer> — no reasoning or extra text on that line.\n"
-    "❖ The final answer should be simplified to its simplest form, e.g., 25, 2516_8, \\frac{1}{36}, etc."
+    "1. **Reasoning**: updated step‑by‑step thoughts.\n"
+    "2. **Answer:** the corrected final result."
+    "❖ The final answer should be simplified to its simplest form,e.g., 25, 2516_8, \frac{1}{36}, etc."
 )
 
 # ───── Intent extraction prompt (optional) ─────

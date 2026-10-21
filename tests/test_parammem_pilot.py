@@ -176,12 +176,14 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(pilot.qa_score("New York", "New York City")["f1"], 0.8)
         self.assertEqual(pilot.qa_score("yes", "no")["f1"], 0)
 
-    def test_memory_uses_training_contract_without_current_answer(self):
+    def test_memory_uses_author_inference_contract_without_current_answer(self):
         for domain, marker in [("code", "FUNC_SIGNATURE:"), ("math", "PROBLEM:"), ("qa", "[Question]:")]:
             messages = pilot.memory_messages(domain, "frozen question")
             self.assertIn(marker, messages[1]["content"])
             self.assertTrue(messages[1]["content"].endswith("frozen question"))
             self.assertNotIn("Current response:", messages[1]["content"])
+            if domain != "qa":
+                self.assertIn("[Example]", messages[0]["content"])
 
     def test_math_units_do_not_change_numeric_value(self):
         self.assertEqual(pilot.clean_math(r"428\text{ square centimeters}"), "428")
