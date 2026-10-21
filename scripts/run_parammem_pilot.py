@@ -229,7 +229,7 @@ class Journal:
     def actor_finish_reason(self, answer):
         reasons = {choice.get("finish_reason") for call in self.cache.values()
                    if call.get("type") == "actor" for choice in call["response"]["choices"]
-                   if choice["message"].get("content") == answer}
+                   if (choice["message"].get("content") or "").strip() == answer.strip()}
         return reasons.pop() if len(reasons) == 1 else None
 
     def write(self, value):

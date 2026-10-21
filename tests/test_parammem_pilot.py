@@ -211,6 +211,7 @@ class PilotTests(unittest.TestCase):
             choice = {"message": {"content": "unfinished reasoning"}, "finish_reason": "length"}
             journal.cache["a"] = {"type": "actor", "response": {"choices": [choice]}}
             self.assertEqual(journal.actor_finish_reason("unfinished reasoning"), "length")
+            self.assertEqual(journal.actor_finish_reason("\nunfinished reasoning\n"), "length")
             self.assertIsNone(journal.actor_finish_reason("other answer"))
             journal.cache["b"] = {"type": "actor", "response": {"choices": [{**choice, "finish_reason": "stop"}]}}
             self.assertIsNone(journal.actor_finish_reason("unfinished reasoning"))
