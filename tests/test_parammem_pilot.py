@@ -108,6 +108,33 @@ class PilotTests(unittest.TestCase):
             journal.write({"type": "evaluation", "result": {"success": False}})
             self.assertEqual(set(pilot.Journal(Path(directory)).cache), {"a"})
 
+    def test_finish_reason_requires_exact_logged_response(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = pilot.Journal(Path(directory))
+            choice = {"message": {"content": "unfinished reasoning"}, "finish_reason": "length"}
+            journal.cache["a"] = {"type": "actor", "response": {"choices": [choice]}}
+            self.assertEqual(journal.actor_finish_reason("unfinished reasoning"), "length")
+            self.assertIsNone(journal.actor_finish_reason("other answer"))
+            journal.cache["b"] = {"type": "actor", "response": {"choices": [{**choice, "finish_reason": "stop"}]}}
+            self.assertIsNone(journal.actor_finish_reason("unfinished reasoning"))
+
+    def test_math_truncation_without_final_is_budget_failure(self):
+        try:
+            import sympy
+            import antlr4
+            from executors.Math_executor import _extract_final_answer
+        except ImportError:
+            self.skipTest("Requires the server Math evaluation dependencies")
+        answer = "Let us reason carefully. The possible pairs are (N, P) or (P,"
+        self.assertFalse(pilot.math_score(answer, "4", finish_reason="length")["success"])
+        self.assertEqual(pilot.math_score(answer, "4", finish_reason="length")["status"],
+                         "budget_exhausted_without_final")
+        self.assertIsNone(pilot.math_score(answer, "4", finish_reason="stop")["success"])
+        self.assertIsNone(pilot.math_score(answer, "bad gold", finish_reason="length")["success"])
+        self.assertIsNone(pilot.math_score("Answer: x", "4", finish_reason="length")["success"])
+        self.assertIsNone(pilot.math_score("x", "4", finish_reason="length")["success"])
+        self.assertTrue(pilot.math_score("4", "4", finish_reason="length")["success"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -141,18 +141,23 @@ def clean_math(value):
     return value
 
 
-def math_score(answer, gold):
+def math_score(answer, gold, finish_reason=None):
     # Preserve the domain's brace-aware final-answer extraction. Only its remote
     # judge is replaced; unparseable expressions remain explicitly unresolved.
     from executors.Math_executor import _extract_final_answer
     from sympy import Symbol, pi, simplify
     from sympy.parsing.latex import parse_latex
-    pred = clean_math(_extract_final_answer(answer) or answer)
+    extracted = _extract_final_answer(answer)
+    pred = clean_math(extracted or answer)
     ref = clean_math(gold)
     if pred == ref:
         return {"success": True, "prediction": pred, "status": "exact"}
+    left = right = None
     try:
-        left, right = parse_latex(pred, strict=True), parse_latex(ref, strict=True)
+        right = parse_latex(ref, strict=True).subs(Symbol("pi"), pi)
+        if right.free_symbols:
+            raise ValueError("Scalar diagnostic received free symbols")
+        left = parse_latex(pred, strict=True)
         # SymPy's LaTeX parser represents \pi as a free Symbol, not its
         # mathematical constant. Resolve only this explicitly named constant.
         left = left.subs(Symbol("pi"), pi)
@@ -165,6 +170,9 @@ def math_score(answer, gold):
             raise ValueError("Equivalence remains undecided")
         return {"success": bool(correct), "prediction": pred, "status": "symbolic"}
     except Exception as exc:
+        if finish_reason == "length" and not extracted and left is None and right is not None and not right.free_symbols:
+            return {"success": False, "prediction": pred, "status": "budget_exhausted_without_final",
+                    "finish_reason": finish_reason, "error": f"{type(exc).__name__}: {exc}"}
         return {"success": None, "prediction": pred, "status": "unresolved",
                 "error": f"{type(exc).__name__}: {exc}"}
 
@@ -208,6 +216,12 @@ class Journal:
         self.write({"type": "sample_use", "kind": kind, "key": digest(sampled),
                     "seed": sampled["seed"], "cached": digest(sampled) in self.cache})
         return sampled
+
+    def actor_finish_reason(self, answer):
+        reasons = {choice.get("finish_reason") for call in self.cache.values()
+                   if call.get("type") == "actor" for choice in call["response"]["choices"]
+                   if choice["message"].get("content") == answer}
+        return reasons.pop() if len(reasons) == 1 else None
 
     def write(self, value):
         with (self.directory / "calls.jsonl").open("a") as handle:
@@ -356,7 +370,7 @@ def make_executor(domain, journal):
                 success, error = code_check(code, test + f"\ncheck({name})", timeout)
                 result = {"success": success, "error": error}
             elif domain == "math":
-                result = math_score(*values)
+                result = math_score(*values, finish_reason=journal.actor_finish_reason(values[0]))
             else:
                 result = qa_score(*values)
             journal.write({"type": "evaluation", "inputs": list(values), "result": result})
