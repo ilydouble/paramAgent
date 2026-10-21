@@ -177,7 +177,9 @@ def math_score(answer, gold, finish_reason=None):
             raise ValueError("Equivalence remains undecided")
         return {"success": bool(correct), "prediction": pred, "status": "symbolic"}
     except Exception as exc:
-        if finish_reason == "length" and not extracted and left is None and right is not None and not right.free_symbols:
+        terminal_final = _extract_final_answer(answer.rstrip().splitlines()[-1]) if answer.strip() else None
+        if (finish_reason == "length" and not terminal_final and left is None
+                and right is not None and not right.free_symbols):
             return {"success": False, "prediction": pred, "status": "budget_exhausted_without_final",
                     "finish_reason": finish_reason, "error": f"{type(exc).__name__}: {exc}"}
         return {"success": None, "prediction": pred, "status": "unresolved",

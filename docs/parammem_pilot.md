@@ -26,9 +26,11 @@ Math 使用末答案抽取、单位清理及 SymPy LaTeX 数值等价，QA 使�
 这是三组共享的诊断适配，不声称与历史远程裁判完全等价。
 
 Math 无法确认的等价性保留 unresolved，整个运行不会标记完成，不将它静默当作错误。
-仅当精确匹配的Actor响应记录明确为`finish_reason=length`、无可抽取终答、
+仅当精确匹配的Actor响应记录明确为`finish_reason=length`、没有可抽取的末行终答、
 且标量gold可解析时，无效表达式记为`budget_exhausted_without_final`失败；
-这是既定token预算内未提交答案，不是等价性未决。正常终止、显式但不可解析的终答、
+这是既定token预算内未提交答案，不是等价性未决。推理中引用的旧`Answer:`可能被旧抽取器
+错误匹配为不可解析表达式；截断且末行无终答时同样记为预算失败，保留原始响应和错误。
+正常终止、显式但不可解析的末行终答、
 缺失或矛盾的截断证据、gold解析失败仍保持unresolved；不增加预算或抽样重试。
 Code 的生成代码在有 CPU/内存/墙钟限制的子进程中执行；这不是安全沙箱。
 先以 HumanEval canonical solution 检查选择的测试契约。
