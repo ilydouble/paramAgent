@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/run_parammem_pilot.py"
 spec = importlib.util.spec_from_file_location("parammem_pilot", SCRIPT)
@@ -11,6 +12,37 @@ spec.loader.exec_module(pilot)
 
 
 class PilotTests(unittest.TestCase):
+    def test_explicit_dpo_checks_hash_and_exact_sft_base(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adapter = root / "new-dpo"
+            adapter.mkdir()
+            weights = adapter / "adapter_model.safetensors"
+            weights.write_bytes(b"newly trained adapter")
+            config = adapter / "adapter_config.json"
+            base = root / "models" / pilot.BASES["code"]
+            config.write_text(json.dumps({"base_model_name_or_path": str(base)}))
+            args = SimpleNamespace(domain="code", method="parammem-dpo", model_root=root,
+                                   dpo_adapter_path=adapter, expected_dpo_sha256=pilot.file_digest(weights))
+            self.assertEqual(pilot.resolve_dpo_adapter(args), (adapter.resolve(), args.expected_dpo_sha256))
+            config.write_text(json.dumps({"base_model_name_or_path": str(root / "other" / base.name)}))
+            with self.assertRaisesRegex(ValueError, "base mismatch"):
+                pilot.resolve_dpo_adapter(args)
+            config.write_text(json.dumps({"base_model_name_or_path": str(base)}))
+            weights.write_bytes(b"different checkpoint")
+            with self.assertRaisesRegex(ValueError, "SHA256"):
+                pilot.resolve_dpo_adapter(args)
+
+    def test_explicit_dpo_requires_hash_and_dpo_method(self):
+        args = SimpleNamespace(domain="code", method="parammem-dpo", model_root=Path("/tmp"),
+                               dpo_adapter_path=Path("/tmp/new-dpo"), expected_dpo_sha256=None)
+        with self.assertRaisesRegex(ValueError, "together"):
+            pilot.resolve_dpo_adapter(args)
+        args.expected_dpo_sha256 = "expected"
+        args.method = "parammem"
+        with self.assertRaisesRegex(ValueError, "require method"):
+            pilot.resolve_dpo_adapter(args)
+
     def test_repeated_samples_have_distinct_reproducible_seeds(self):
         with tempfile.TemporaryDirectory() as directory:
             journal = pilot.Journal(Path(directory))

@@ -48,6 +48,9 @@ python scripts/run_parammem_pilot.py \
 ```
 
 身份文件固定输入、runner、harness和权重哈希；身份不同拒绝复用输出。
+复测新训练的DPO时，同时提供`--dpo-adapter-path /absolute/new/adapter`和
+`--expected-dpo-sha256 <已验证的adapter_model.safetensors哈希>`，替代默认历史登记项。
+入口核对文件哈希和精确SFT底座路径，身份文件记录实际adapter路径；其余两组不接受该覆盖。
 每次调用追加并 fsync，完整重放可从日志恢复相同请求及采样序号的输出。
 恢复时使用新输出目录，仅以旧 `calls.jsonl` 初始化缓存，不复用阶段结果；禁止原地续跑，
 避免原 runner 跳过阶段后无法还原采样次数和记忆库。

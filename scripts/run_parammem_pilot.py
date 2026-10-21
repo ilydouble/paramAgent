@@ -50,6 +50,34 @@ def read_rows(path):
     return [json.loads(s) for s in Path(path).read_text().splitlines() if s.strip()]
 
 
+def resolve_dpo_adapter(args):
+    explicit = getattr(args, "dpo_adapter_path", None)
+    expected = getattr(args, "expected_dpo_sha256", None)
+    if bool(explicit) != bool(expected):
+        raise ValueError("Explicit DPO path and expected SHA256 must be supplied together")
+    if args.method != "parammem-dpo":
+        if explicit:
+            raise ValueError("Explicit DPO weights require method parammem-dpo")
+        return None, None
+    if explicit:
+        adapter = Path(explicit).resolve(strict=True)
+    else:
+        adapter = args.model_root / "lora-qwen3.5-2b-dpo" / ADAPTERS[args.domain]
+        registry = json.loads((ROOT / "docs/models/model-registry.json").read_text())
+        expected = next(model["adapter_sha256"] for model in registry["models"]
+                        if model["path"] == "lora-qwen3.5-2b-dpo/" + ADAPTERS[args.domain])
+    actual = file_digest(adapter / "adapter_model.safetensors")
+    if actual != expected:
+        raise ValueError("DPO weights differ from expected checkpoint SHA256")
+    metadata = json.loads((adapter / "adapter_config.json").read_text())
+    declared_base = Path(metadata["base_model_name_or_path"])
+    if not declared_base.is_absolute():
+        declared_base = args.model_root / declared_base
+    if declared_base.resolve() != (args.model_root / "models" / BASES[args.domain]).resolve():
+        raise ValueError("DPO adapter/SFT base mismatch")
+    return adapter, actual
+
+
 def stage_results(directory):
     """The legacy results.jsonl stops at Stage 1; Stage 2 has its own file."""
     directory = Path(directory)
@@ -239,10 +267,7 @@ class LocalMemory:
         self.model = AutoModelForCausalLM.from_pretrained(base, quantization_config=quant,
                                                        device_map={"": 0}, dtype=torch.bfloat16)
         if self.args.method == "parammem-dpo":
-            adapter = self.args.model_root / "lora-qwen3.5-2b-dpo" / ADAPTERS[self.args.domain]
-            metadata = json.loads((adapter / "adapter_config.json").read_text())
-            if Path(metadata["base_model_name_or_path"]).name != base.name:
-                raise ValueError("DPO adapter/SFT base mismatch")
+            adapter, _ = resolve_dpo_adapter(self.args)
             self.model = PeftModel.from_pretrained(self.model, adapter)
         self.model.eval()
         self.tokenizer = AutoTokenizer.from_pretrained(base)
@@ -343,6 +368,7 @@ def make_executor(domain, journal):
 
 
 def run(args):
+    adapter, adapter_sha256 = resolve_dpo_adapter(args)
     args.output.mkdir(parents=True, exist_ok=True)
     if (args.output / "results.jsonl").exists():
         raise ValueError("Use a fresh output directory; seed only calls.jsonl for a full deterministic replay")
@@ -361,13 +387,8 @@ def run(args):
         base = args.model_root / "models" / BASES[args.domain]
         identity["base_weights_sha256"] = file_digest(base / "model.safetensors")
         if args.method == "parammem-dpo":
-            adapter = args.model_root / "lora-qwen3.5-2b-dpo" / ADAPTERS[args.domain]
-            identity["adapter_sha256"] = file_digest(adapter / "adapter_model.safetensors")
-            registry = json.loads((ROOT / "docs/models/model-registry.json").read_text())
-            expected = next(m["adapter_sha256"] for m in registry["models"]
-                            if m["path"] == "lora-qwen3.5-2b-dpo/" + ADAPTERS[args.domain])
-            if identity["adapter_sha256"] != expected:
-                raise ValueError("DPO weights differ from audited checkpoint")
+            identity["adapter_sha256"] = adapter_sha256
+            identity["adapter_path"] = str(adapter.resolve())
     meta = args.output / "identity.json"
     if meta.exists() and json.loads(meta.read_text()) != identity:
         raise ValueError("Existing run identity differs; use a new output directory")
@@ -419,6 +440,8 @@ def main():
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model-root", type=Path, required=True)
+    parser.add_argument("--dpo-adapter-path", type=Path)
+    parser.add_argument("--expected-dpo-sha256")
     parser.add_argument("--embedding-path", type=Path, required=True)
     parser.add_argument("--actor-url", default="http://127.0.0.1:8000/v1")
     parser.add_argument("--seed", type=int, default=42)
