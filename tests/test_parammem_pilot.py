@@ -1,9 +1,13 @@
 import importlib.util
+import ast
+import io
 import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 from types import SimpleNamespace
+from typing import Optional
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/run_parammem_pilot.py"
 spec = importlib.util.spec_from_file_location("parammem_pilot", SCRIPT)
@@ -12,6 +16,86 @@ spec.loader.exec_module(pilot)
 
 
 class PilotTests(unittest.TestCase):
+    def budget_args(self, **overrides):
+        return SimpleNamespace(**{"actor_url": "http://127.0.0.1:8000/v1", "actor_context_tokens": 16384,
+                                  "math_answer_tokens": 8192, "context_reserve_tokens": 256, **overrides})
+
+    def test_exact_budget_uses_server_tokenization_and_caches_counts(self):
+        actor = pilot.LocalActor(self.budget_args(), None)
+        messages = [SimpleNamespace(role="user", content="question")]
+        with patch.object(pilot.urllib.request, "urlopen", return_value=io.StringIO(
+                json.dumps({"count": 863, "max_model_len": 16384}))) as request:
+            self.assertEqual(actor.completion_budget(messages, 8192), 8192)
+            self.assertEqual(actor.completion_budget(messages, 4096), 4096)
+            self.assertEqual(request.call_count, 1)
+            self.assertEqual(request.call_args.args[0].full_url, "http://127.0.0.1:8000/tokenize")
+            payload = json.loads(request.call_args.args[0].data)
+            self.assertEqual(payload["messages"], [{"role": "user", "content": "question"}])
+            self.assertEqual(payload["chat_template_kwargs"], {"enable_thinking": False})
+
+    def test_long_prompt_reduces_output_and_invalid_context_fails_closed(self):
+        messages = [{"role": "user", "content": "question"}]
+        for metadata, expected in [({"count": 12000, "max_model_len": 16384}, 4128),
+                                   ({"count": 16128, "max_model_len": 16384}, None),
+                                   ({"count": 863, "max_model_len": 8192}, None),
+                                   ({"count": -1, "max_model_len": 16384}, None)]:
+            actor = pilot.LocalActor(self.budget_args(), None)
+            with self.subTest(metadata=metadata), patch.object(pilot.urllib.request, "urlopen",
+                    return_value=io.StringIO(json.dumps(metadata))):
+                if expected is None:
+                    with self.assertRaises(ValueError):
+                        actor.completion_budget(messages, 8192)
+                else:
+                    self.assertEqual(actor.completion_budget(messages, 8192), expected)
+
+    def test_actor_sends_expanded_budget_and_logs_actual_prompt_count(self):
+        journal = SimpleNamespace(cache={}, context={}, write=Mock(),
+                                  sample_request=lambda kind, payload: payload)
+        actor = pilot.LocalActor(self.budget_args(seed=42), journal)
+        responses = [io.StringIO(json.dumps({"count": 863, "max_model_len": 16384})),
+                     io.StringIO(json.dumps({"choices": [{"index": 0, "message": {"content": "Answer: 4"},
+                                                          "finish_reason": "stop"}]}))]
+        with patch.object(pilot.urllib.request, "urlopen", side_effect=responses) as request:
+            output = actor.generate_chat([SimpleNamespace(role="user", content="question")], max_tokens=8192)
+            self.assertEqual(output, "Answer: 4")
+            self.assertEqual(json.loads(request.call_args_list[1].args[0].data)["max_tokens"], 8192)
+        budget = journal.write.call_args_list[0].args[0]
+        self.assertEqual((budget["prompt_tokens"], budget["max_tokens"], budget["context_tokens"]),
+                         (863, 8192, 16384))
+
+    def test_budget_settings_are_explicit_and_validated(self):
+        with patch.dict(pilot.os.environ, {}, clear=False):
+            pilot.configure_generation_budget(self.budget_args())
+            self.assertEqual(pilot.os.environ["VLLM_MAX_MODEL_LEN"], "16384")
+            self.assertEqual(pilot.os.environ["MATH_MAX_ANSWER_TOKENS"], "8192")
+            for overrides in ({"math_answer_tokens": 0}, {"context_reserve_tokens": -1},
+                              {"actor_context_tokens": 8192}, {"actor_context_tokens": 0}):
+                with self.subTest(overrides=overrides), self.assertRaises(ValueError):
+                    pilot.configure_generation_budget(self.budget_args(**overrides))
+
+    def test_math_helper_uses_runtime_cap_and_exact_actor_budget(self):
+        tree = ast.parse((SCRIPT.parents[1] / "generators/generator_utils.py").read_text())
+        function = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                        and node.name == "_answer_max_tokens")
+        namespace = {"List": list, "Optional": Optional, "Message": object,
+                     "MAX_ANSWER_TOKENS": 8192, "MAX_CONTEXT_TOKENS": 16384, "RESERVED_TOKENS": 256}
+        exec(compile(ast.Module(body=[function], type_ignores=[]), "budget_helper", "exec"), namespace)
+        budget = namespace["_answer_max_tokens"]
+        messages = [SimpleNamespace(content="short")]
+        self.assertEqual(budget(messages), 8192)
+        namespace["MAX_ANSWER_TOKENS"] = 4096
+        self.assertEqual(budget(messages), 4096)
+        model = SimpleNamespace(completion_budget=lambda messages, cap: min(cap, 3000))
+        self.assertEqual(budget(messages, model=model), 3000)
+        with self.assertRaises(ValueError):
+            budget([SimpleNamespace(content="x" * 50000)])
+        runner = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                      and node.name == "generic_generate_mathqa_impl")
+        calls = [node for node in ast.walk(runner) if isinstance(node, ast.Call)
+                 and isinstance(node.func, ast.Name) and node.func.id == "_answer_max_tokens"]
+        self.assertTrue(calls)
+        self.assertTrue(all(any(keyword.arg == "model" for keyword in call.keywords) for call in calls))
+
     def test_explicit_dpo_checks_hash_and_exact_sft_base(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

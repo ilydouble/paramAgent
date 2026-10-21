@@ -236,9 +236,40 @@ class LocalActor:
 
     def __init__(self, args, journal):
         self.args, self.journal = args, journal
+        self.token_counts = {}
+
+    def completion_budget(self, messages, cap):
+        if cap <= 0:
+            raise ValueError("Actor output budget must be positive")
+        messages = [{"role": message.role, "content": message.content}
+                    if not isinstance(message, dict) else message for message in messages]
+        payload = {"model": self.name, "messages": messages, "add_generation_prompt": True,
+                   "chat_template_kwargs": {"enable_thinking": False}}
+        key = digest(payload)
+        if key not in self.token_counts:
+            request = urllib.request.Request(self.args.actor_url.rstrip("/").removesuffix("/v1") + "/tokenize",
+                data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(request, timeout=30) as response:
+                metadata = json.load(response)
+            if type(metadata.get("count")) is not int or metadata["count"] < 0:
+                raise ValueError("Actor tokenizer returned an invalid prompt count")
+            if metadata.get("max_model_len") != self.args.actor_context_tokens:
+                raise ValueError("Actor server/context configuration mismatch")
+            self.token_counts[key] = metadata["count"]
+        self.last_prompt_tokens = self.token_counts[key]
+        available = self.args.actor_context_tokens - self.last_prompt_tokens - self.args.context_reserve_tokens
+        if available <= 0:
+            raise ValueError("Actor prompt exhausts the configured context window")
+        return min(cap, available)
 
     def generate_chat(self, messages, max_tokens=1024, temperature=0.2, num_comps=1):
         messages = [{"role": m.role, "content": m.content} for m in messages]
+        requested_tokens = max_tokens
+        max_tokens = self.completion_budget(messages, max_tokens)
+        self.journal.write({"type": "actor_budget", "requested_max_tokens": requested_tokens,
+                            "max_tokens": max_tokens, "context_tokens": self.args.actor_context_tokens,
+                            "prompt_tokens": self.last_prompt_tokens,
+                            "reserve_tokens": self.args.context_reserve_tokens})
         payload = {"model": self.name, "messages": messages, "max_tokens": max_tokens,
                    "temperature": temperature, "top_p": 0.9, "n": num_comps,
                    "seed": self.args.seed, "chat_template_kwargs": {"enable_thinking": False}}
@@ -381,7 +412,16 @@ def make_executor(domain, journal):
     return DiagnosticExecutor()
 
 
+def configure_generation_budget(args):
+    if (args.actor_context_tokens <= 0 or args.math_answer_tokens <= 0 or args.context_reserve_tokens < 0
+            or args.math_answer_tokens + args.context_reserve_tokens >= args.actor_context_tokens):
+        raise ValueError("Invalid actor context/output/reserve budget")
+    os.environ["VLLM_MAX_MODEL_LEN"] = str(args.actor_context_tokens)
+    os.environ["MATH_MAX_ANSWER_TOKENS"] = str(args.math_answer_tokens)
+
+
 def run(args):
+    configure_generation_budget(args)
     adapter, adapter_sha256 = resolve_dpo_adapter(args)
     args.output.mkdir(parents=True, exist_ok=True)
     if (args.output / "results.jsonl").exists():
@@ -396,7 +436,9 @@ def run(args):
         "sampling": "seed plus occurrence of identical request; fresh full replay only",
         "feedback": "oracle diagnostic; HumanEval full tests / numeric Math equality / QA EM",
         "embedding": str(args.embedding_path), "embedding_max_tokens": 512,
-        "actor_url": args.actor_url, "actor": "Qwen3.5-4B"}
+        "actor_url": args.actor_url, "actor": "Qwen3.5-4B",
+        "actor_context_tokens": args.actor_context_tokens, "math_answer_tokens": args.math_answer_tokens,
+        "context_reserve_tokens": args.context_reserve_tokens, "actor_token_counting": "vllm_tokenize"}
     if args.method != "qwen":
         base = args.model_root / "models" / BASES[args.domain]
         identity["base_weights_sha256"] = file_digest(base / "model.safetensors")
@@ -414,6 +456,10 @@ def run(args):
     os.environ.setdefault("ANTHROPIC_API_KEY", "unused-local-diagnostic")
     os.environ["AWS_EC2_METADATA_DISABLED"] = "true"
     import generators
+    from generators import generator_utils
+    generator_utils.MAX_CONTEXT_TOKENS = args.actor_context_tokens
+    generator_utils.MAX_ANSWER_TOKENS = args.math_answer_tokens
+    generator_utils.RESERVED_TOKENS = args.context_reserve_tokens
     import memory_utils
     actor = LocalActor(args, journal)
     generators.model_factory = lambda name: actor
@@ -458,6 +504,9 @@ def main():
     parser.add_argument("--expected-dpo-sha256")
     parser.add_argument("--embedding-path", type=Path, required=True)
     parser.add_argument("--actor-url", default="http://127.0.0.1:8000/v1")
+    parser.add_argument("--actor-context-tokens", type=int, default=16384)
+    parser.add_argument("--math-answer-tokens", type=int, default=8192)
+    parser.add_argument("--context-reserve-tokens", type=int, default=256)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--iterations", type=int, default=5)
     args = parser.parse_args()

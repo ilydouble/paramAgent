@@ -1858,7 +1858,7 @@ def multihopqa_generate_self_reflection_diverse_parametric(
 #  Adaptive output budget for math answer generation                        #
 #                                                                          #
 #  vLLM enforces `prompt + completion <= max-model-len` (the server runs    #
-#  with `--max-model-len 8192` on a 4090 and that window cannot be grown).  #
+#  with the context window configured for the selected server).           #
 #  Multi-iteration strategies (reflexion/dot/bank) carry the previous       #
 #  answer + reflection + insights back into the prompt, so the input side   #
 #  grows each iteration. Instead of a fixed output cap (which can overflow  #
@@ -1867,22 +1867,28 @@ def multihopqa_generate_self_reflection_diverse_parametric(
 #  and automatically stepping back when the prompt is long.                 #
 # ──────────────────────────────────────────────────────────────────────── #
 MAX_CONTEXT_TOKENS = int(os.environ.get("VLLM_MAX_MODEL_LEN", "8192"))
-MAX_ANSWER_TOKENS = 2048      # desired output ceiling on short prompts
+MAX_ANSWER_TOKENS = int(os.environ.get("MATH_MAX_ANSWER_TOKENS", "8192"))
 RESERVED_TOKENS = 256         # safety margin below the hard window
 
 
-def _answer_max_tokens(messages: List[Message], cap: int = MAX_ANSWER_TOKENS) -> int:
+def _answer_max_tokens(messages: List[Message], cap: Optional[int] = None, model=None) -> int:
     """Fit the answer generation into the shared context window.
 
-    Estimates the prompt length in tokens (conservative: ~3 chars per token,
-    over-counting so the estimate errs toward reserving more input room). The
-    returned value never exceeds *cap* and never lets prompt+output break the
-    window:
-        max_tokens = clamp(MAX_CONTEXT_TOKENS - est_prompt - RESERVED, 1, cap)
+    Use the model's exact token budget when available; otherwise retain the
+    legacy three-characters-per-token estimate. Reject exhausted contexts
+    instead of silently requesting one token. The estimate is not a guarantee
+    for arbitrary languages or tokenizers.
     """
+    cap = MAX_ANSWER_TOKENS if cap is None else cap
+    if cap <= 0 or MAX_CONTEXT_TOKENS <= RESERVED_TOKENS:
+        raise ValueError("Invalid Math generation budget")
+    if callable(getattr(model, "completion_budget", None)):
+        return model.completion_budget(messages, cap)
     est_prompt_tokens = sum(len(m.content) // 3 + 4 for m in messages)
     available = MAX_CONTEXT_TOKENS - est_prompt_tokens - RESERVED_TOKENS
-    return max(1, min(cap, available))
+    if available <= 0:
+        raise ValueError("Math prompt exhausts the configured context window")
+    return min(cap, available)
 
 
 def generic_generate_mathqa_impl(
@@ -1995,7 +2001,7 @@ def generic_generate_mathqa_impl(
 
         out = model.generate_chat(
             messages=messages,
-            max_tokens=_answer_max_tokens(messages),
+            max_tokens=_answer_max_tokens(messages, model=model),
             temperature=temperature,
             num_comps=num_comps,
         )

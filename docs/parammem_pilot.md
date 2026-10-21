@@ -52,6 +52,15 @@ python scripts/run_parammem_pilot.py \
 ```
 
 身份文件固定输入、runner、harness和权重哈希；身份不同拒绝复用输出。
+Math正式回答默认上限为8192生成token，入口显式设置`--math-answer-tokens 8192`、
+`--actor-context-tokens 16384`及`--context-reserve-tokens 256`；三组共用这些参数。
+Actor通过同一vLLM服务的`/tokenize`按实际chat template精确计数；服务报告的上下文必须
+与入口配置一致，否则停止。实际输出上限为请求预算与上下文剩余量的较小值；不截断输入，
+上下文耗尽时明确报错。每次调用记录`actor_budget`（输入token、期望/实际输出上限与预留），
+身份文件记录预算参数。非pilot入口可用`MATH_MAX_ANSWER_TOKENS`配置回答上限，
+`VLLM_MAX_MODEL_LEN`应与各自服务一致；未提供精确计数接口的旧后端仍采用原估算方式。
+预算调整后必须使用全新输出目录，不以2048预算的响应缓存初始化扩大预算的比较；
+原实验仅保留为旧预算诊断，不混入新结果。8192仍是有限上限，并不保证模型不会截断。
 复测新训练的DPO时，同时提供`--dpo-adapter-path /absolute/new/adapter`和
 `--expected-dpo-sha256 <已验证的adapter_model.safetensors哈希>`，替代默认历史登记项。
 入口核对文件哈希和精确SFT底座路径，身份文件记录实际adapter路径；其余两组不接受该覆盖。
