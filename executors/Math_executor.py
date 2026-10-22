@@ -96,31 +96,36 @@ def _extract_final_answer(text: str) -> Optional[str]:
 
     The math system prompt asks the model to finish with a line of the form
     ``**`Answer:`** <final answer>``. Match that (and a few common variants)
-    and return just the answer value. When no such line is present — e.g. the
+    and return just the answer value. Markdown answer headings are also accepted;
+    the last answer label wins regardless of its formatting. When no such line is present — e.g. the
     response was cut off, or the model answered with ``\\boxed{...}`` only —
     fall back to the last ``\\boxed{...}`` and finally to None, in which case
     callers use the raw response as-is.
     """
     if not text:
         return None
-    # The last "Answer: <x>" line, matching bold/backtick variants. The first
-    # pattern is the format the system prompt actually asks for
-    # ("**`Answer:`** <value>"); the looser ones below catch the variants.
-    patterns = [
-        r'\*\*\s*`\s*Answer\s*:\s*`\s*\*\*\s*(.+?)(?:\n|$)',
-        r'\*\*\s*`?\s*Answer\s*`?\s*\*\*\s*:\s*(.+?)(?:\n|$)',
-        r'\*\*\s*`?\s*Answer\s*`?\s*:\s*\*\*\s*(.+?)(?:\n|$)',
-        r'\*\*Answer\*\*\s*:\s*(.+?)(?:\n|$)',
-        r'Answer\s*:\s*(.+?)(?:\n|$)',
-        r'\*\*answer\*\*\s*:\s*(.+?)(?:\n|$)',
-        r'answer\s*:\s*(.+?)(?:\n|$)',
-    ]
-    for pattern in patterns:
-        matches = list(re.finditer(pattern, text, re.IGNORECASE))
-        if matches:
-            val = _clean_value(matches[-1].group(1))
-            if val:
-                return val
+    pattern = re.compile(
+        r'^[ \t]*(?P<heading>#{1,6}[ \t]+)?(?:\*\*|`)*[ \t]*'
+        r'(?:Final[ \t]+)?Answer\b[ \t]*(?:\*\*|`)*[ \t]*'
+        r'(?P<colon>:)?[ \t]*(?:\*\*|`)*[ \t]*(?P<value>.*)$', re.IGNORECASE)
+    lines = text.splitlines()
+    candidates = []
+    for index, line in enumerate(lines):
+        match = pattern.match(line)
+        if not match:
+            continue
+        value = match.group('value').strip()
+        if value and not (match.group('heading') or match.group('colon')):
+            continue
+        if not value:
+            value = next((following.strip() for following in lines[index + 1:] if following.strip()), '')
+            if pattern.match(value):
+                continue
+        value = _clean_value(value)
+        if value:
+            candidates.append(value)
+    if candidates:
+        return candidates[-1]
     boxed = _find_boxed(text)
     return _clean_value(boxed) if boxed else None
 

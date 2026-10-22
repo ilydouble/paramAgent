@@ -90,6 +90,8 @@ def stage_results(directory):
     first = read_rows(directory / "first_stage_log.jsonl")
     second = directory / "second_stage_log.jsonl"
     final = read_rows(second) if second.exists() else first
+    if any(row.get("runtime_error") for row in first + final):
+        raise RuntimeError("Runtime errors remain; run cannot be reported as complete")
     initial_ids = {r["task_id"] for r in first}
     if len(first) != len(initial_ids) or len(final) != len(first) or {r["task_id"] for r in final} != initial_ids:
         raise RuntimeError("Stage result IDs are incomplete or duplicated")
@@ -438,6 +440,7 @@ def run(args):
         "method": args.method, "dataset_sha256": file_digest(args.dataset),
         "runner_sha256": file_digest(ROOT / RUNNERS[args.domain]), "adapter_sha256": None,
         "harness_sha256": file_digest(__file__), "seed": args.seed, "iterations": args.iterations,
+        "math_executor_sha256": file_digest(ROOT / "executors/Math_executor.py") if args.domain == "math" else None,
         "expected_tasks": args.expected_tasks,
         "sampling": "seed plus occurrence of identical request; fresh full replay only",
         "feedback": "oracle diagnostic; HumanEval full tests / numeric Math equality / QA EM",

@@ -16,6 +16,25 @@ spec.loader.exec_module(pilot)
 
 
 class PilotTests(unittest.TestCase):
+    def test_runtime_errors_cannot_be_reported_as_wrong_answers_or_complete(self):
+        with tempfile.TemporaryDirectory() as directory:
+            rows = [{"task_id": "failed", "is_solved": None, "runtime_error": "ValueError: unresolved"}]
+            Path(directory, "first_stage_log.jsonl").write_text(json.dumps(rows[0]) + "\n")
+            with self.assertRaisesRegex(RuntimeError, "Runtime errors remain"):
+                pilot.stage_results(directory)
+
+    def test_markdown_answers_are_scored_without_changing_equivalence_policy(self):
+        try:
+            import sympy
+            import antlr4
+            from executors.Math_executor import _extract_final_answer
+        except ImportError:
+            self.skipTest("Requires the server Math evaluation dependencies")
+        self.assertTrue(pilot.math_score("### Answer\n8.6", "8.6")["success"])
+        self.assertFalse(pilot.math_score("### Answer\n\n10.3", "8.6")["success"])
+        self.assertTrue(pilot.math_score("Answer: 3/2", r"\frac{3}{2}")["success"])
+        self.assertIsNone(pilot.math_score("### Answer\nx", "8.6")["success"])
+
     def test_pilot_uses_author_inference_prompts_and_tracks_transitive_sources(self):
         from shared.parammem_prompts import AUTHOR_COMMIT, memory_messages
         for domain in ("code", "math", "qa"):

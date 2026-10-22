@@ -168,7 +168,7 @@ def run_dot(
         rt = runtime if runtime is not None else item.get('runtime', 0)
         entry = "\n".join([
             "=" * 70,
-            f"[{i + 1}/{num_items}] [STAGE {stage}] {'✓ RIGHT' if is_solved else '✗ WRONG'}  (runtime {round(rt, 2)}s)",
+            f"[{i + 1}/{num_items}] [STAGE {stage}] {'ERROR' if item.get('runtime_error') else ('✓ RIGHT' if is_solved else '✗ WRONG')}  (runtime {round(rt, 2)}s)",
             "=" * 70,
             f"--- Problem ---\n{item.get('problem', '')}\n",
             f"--- Ground Truth ---\n{item.get('answer', '(no answer field)')}\n",
@@ -221,6 +221,7 @@ def run_dot(
     # --------------------------
     for i, item in enumerate_resume(dataset, log_path):
         if skip_first: break
+        start_time = time()
         try:
             cur_pass = 0
             is_solved = False
@@ -436,8 +437,9 @@ def run_dot(
             llm_cost = gpt_usage(backend=model_name)
             print(llm_cost)
 
-            item['runtime'] = end_time - start_time
-            item["is_solved"] = is_solved
+            item['runtime'] = time() - start_time
+            item["is_solved"] = None
+            item["runtime_error"] = f"{type(e).__name__}: {e}"
             print (colored(f"Item {i} solved: {is_solved}", 'green' if is_solved else 'green'))
             item["reflections"] = diverse_reflections
             item["implementations"] = implementations
@@ -484,11 +486,14 @@ def run_dot(
             pkl.dump(failed_problems, f)
 
     print("Finished first pass")
+    with open(mem_bank_file_path, "wb") as f:
+        pkl.dump(memory_bank, f)
     
     # --------------------------
     # Second Pass (memory-augmented)
     # --------------------------
-    memory_bank = pkl.load(open(mem_bank_file_path, "rb"))
+    with open(mem_bank_file_path, "rb") as f:
+        memory_bank = pkl.load(f)
 
     root_path = '/'.join(log_path.split('/')[:-1])
     first_stage_json = root_path + '/first_stage_log.jsonl'
@@ -509,6 +514,7 @@ def run_dot(
     # Keep only first-pass failures not yet retried in Stage 2.
     failed_problems = [rec for rec in logs
                     if not rec.get("is_solved", False)
+                    and not rec.get("runtime_error")
                     and not rec.get("stage2", False)]
     print(f"number of failed problems: {len(failed_problems)}")
 
@@ -826,4 +832,3 @@ def run_dot(
         print_v(f"second pass: completed {num_total_attempts}/{num_items}: acc = {round(num_success/num_total_attempts, 4)}")
 
     print(colored(gpt_usage(backend=model_name), 'blue'))
-    
