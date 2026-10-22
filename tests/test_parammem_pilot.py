@@ -16,6 +16,25 @@ spec.loader.exec_module(pilot)
 
 
 class PilotTests(unittest.TestCase):
+    def test_pilot_uses_author_inference_prompts_and_tracks_transitive_sources(self):
+        from shared.parammem_prompts import AUTHOR_COMMIT, memory_messages
+        for domain in ("code", "math", "qa"):
+            self.assertEqual(pilot.memory_messages(domain, "question"), memory_messages(domain, "question"))
+            identity = pilot.prompt_identity(domain)
+            self.assertEqual(identity["author_commit"], AUTHOR_COMMIT)
+            self.assertEqual(identity["memory_stage"], "inference")
+            self.assertEqual(identity["chat_template_kwargs"], {"enable_thinking": False})
+            sources = identity["source_sha256"]
+            self.assertIn("shared/parammem_prompts.py", sources)
+            self.assertIn("generators/generator_utils.py", sources)
+            self.assertTrue(any(name.startswith(domain + "/") and name.endswith("_inference.py")
+                                for name in sources))
+            self.assertTrue(all(len(value) == 64 for value in sources.values()))
+            original_digest = pilot.file_digest
+            with patch.object(pilot, "file_digest", side_effect=lambda path:
+                              "changed" if str(path).endswith("generator_utils.py") else original_digest(path)):
+                self.assertNotEqual(pilot.prompt_identity(domain), identity)
+
     def test_explicit_small_frozen_sample_preserves_count_and_uniqueness_guards(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "input.jsonl"

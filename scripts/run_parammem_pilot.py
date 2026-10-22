@@ -107,6 +107,19 @@ def memory_messages(domain, question):
     return author_messages(domain, question)
 
 
+def prompt_identity(domain):
+    from shared.parammem_prompts import AUTHOR_COMMIT, AUTHOR_SOURCE_SHA256, author_constants
+    author_constants(domain, "inference")
+    actor_source = {"code": "generators/py_generate.py", "math": "generators/MathQA_generate.py",
+                    "qa": "generators/MiltuhopQA_generate.py"}[domain]
+    sources = ["shared/parammem_prompts.py", "generators/generator_utils.py", actor_source]
+    sources.extend(relative for relative in AUTHOR_SOURCE_SHA256
+                   if relative.startswith(domain + "/") and relative.endswith("_inference.py"))
+    return {"author_commit": AUTHOR_COMMIT, "memory_stage": "inference",
+            "chat_template_kwargs": {"enable_thinking": False},
+            "source_sha256": {relative: file_digest(ROOT / relative) for relative in sources}}
+
+
 def normalize_qa(value):
     import string
     value = value.lower().translate(str.maketrans("", "", string.punctuation))
@@ -420,6 +433,7 @@ def run(args):
     rows = read_frozen_rows(args.dataset, args.expected_tasks)
     identity = {"protocol": "legacy_parammem_triad_diagnostic_v1",
                 "memory_prompt_protocol": "parammem_author_8b36cdd_inference_qwen_no_thinking",
+                "prompt_identity": prompt_identity(args.domain),
                 "domain": args.domain,
         "method": args.method, "dataset_sha256": file_digest(args.dataset),
         "runner_sha256": file_digest(ROOT / RUNNERS[args.domain]), "adapter_sha256": None,

@@ -58,6 +58,12 @@ python scripts/run_parammem_pilot.py \
 ```
 
 身份文件固定输入、runner、harness和权重哈希；身份不同拒绝复用输出。
+`prompt_identity` 额外固定作者提交、推理阶段、关闭 thinking 的 Qwen 包装，
+以及共享提示模块、该域作者推理模板、Actor 模块和消息拼接工具的源码哈希。
+这些间接依赖改变时，即便 runner 与 harness 未变，也不能沿用旧身份目录。
+本地 `fb0c4cc` 已修正提示，之前百题实验仍运行 `ec93a65` 冻结快照；
+更新本地文件不等于更新服务器。提示对齐后复测须另行部署指定版本、使用新目录，
+不以旧 `calls.jsonl` 初始化新协议，也不把本地测试通过当作已完成服务器复测。
 Math正式回答默认上限为8192生成token，入口显式设置`--math-answer-tokens 8192`、
 `--actor-context-tokens 16384`及`--context-reserve-tokens 256`；三组共用这些参数。
 Actor通过同一vLLM服务的`/tokenize`按实际chat template精确计数；服务报告的上下文必须

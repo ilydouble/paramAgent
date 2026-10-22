@@ -7,6 +7,7 @@ import re
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from shared.parammem_prompts import AUTHOR_SOURCE_SHA256, ROOT, author_constants, memory_messages, tokenize_sft
@@ -35,6 +36,73 @@ class Tokenizer:
 
 
 class AuthorSFTTests(unittest.TestCase):
+    def test_independent_inference_entrypoints_use_author_inference_messages(self):
+        for domain, label in (("code", "Code"), ("math", "Math"), ("qa", "QA")):
+            path = ROOT / domain / f"LoRA_Qwen35_{label}_4090_inference.py"
+            tree = ast.parse(path.read_text())
+            function = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                            and node.name == "format_prompt")
+            future = ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0)
+            namespace = {"memory_messages": memory_messages}
+            exec(compile(ast.fix_missing_locations(ast.Module(body=[future, function], type_ignores=[])),
+                         str(path), "exec"), namespace)
+            processor = Processor()
+            self.assertEqual(namespace["format_prompt"](processor, " question "), "rendered prompt")
+            self.assertEqual(processor.messages, memory_messages(domain, "question", "inference"))
+            self.assertEqual(processor.options,
+                             {"tokenize": False, "add_generation_prompt": True, "enable_thinking": False})
+
+    def test_actor_uses_restored_instructions_in_actual_messages(self):
+        path = ROOT / "generators/generator_utils.py"
+        tree = ast.parse(path.read_text())
+        functions = [node for node in tree.body if isinstance(node, ast.FunctionDef)
+                     and node.name in {"generic_generate_mathqa_impl", "generic_generate_func_impl",
+                                       "generic_generate_multihopqa_impl"}]
+        future = ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0)
+        namespace = {"Message": SimpleNamespace, "_answer_max_tokens": lambda *args, **kwargs: 8192,
+                     "print_messages": lambda *args: None, "print_generated_func_body": lambda *args: None}
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[future, *functions], type_ignores=[])),
+                     str(path), "exec"), namespace)
+        model = SimpleNamespace(is_chat=True)
+        requests = []
+        model.generate_chat = lambda **kwargs: requests.append(kwargs) or "answer"
+        namespace["generic_generate_func_impl"](
+            func_sig="def example():", model=model, strategy="simple", prev_func_impl=None,
+            feedback=None, self_reflection=None, num_comps=1, temperature=0.1,
+            reflexion_chat_instruction="unused", reflexion_few_shot="unused",
+            simple_chat_instruction="unused", reflexion_completion_instruction="unused",
+            simple_completion_instruction="unused", code_block_instruction="code block",
+            parse_code_block=lambda value: value, add_code_block=lambda value: value,
+            mistake_insights="author guidance including flawed code")
+        self.assertIn("several flawed implementation examples", requests[-1]["messages"][0].content)
+        self.assertEqual(requests[-1]["messages"][1].content,
+                         "author guidance including flawed code\n [func signature]: def example():")
+        namespace["generic_generate_mathqa_impl"](
+            question="question", model=model, strategy="simple", prev_answers=None,
+            feedback=None, self_reflection=None, num_comps=1, temperature=0.1,
+            simple_chat_instruction="unused", reflexion_chat_instruction="unused",
+            simple_completion_instruction="unused", reflexion_completion_instruction="unused",
+            mistake_insights="author pitfalls")
+        messages = requests[-1]["messages"]
+        self.assertEqual(hashlib.sha256(messages[0].content.encode()).hexdigest(),
+                         "2e732fdbc424d6c7c573d1c8e767d83986967a31e92ef8da5812d48b6a51af92")
+        self.assertEqual(messages[1].content, "[question]: question\n\n[mistake insights]:\nauthor pitfalls")
+        namespace["generic_generate_multihopqa_impl"](
+            question="question", context="supporting passages", model=model, strategy="simple",
+            prev_answers=None, feedback=None, self_reflection=None, num_comps=1, temperature=0.1,
+            simple_chat_instruction="unused", reflexion_chat_instruction="unused",
+            simple_completion_instruction="unused", reflexion_completion_instruction="unused",
+            question_decomposition="author decomposition")
+        messages = requests[-1]["messages"]
+        self.assertEqual(messages[0].content,
+                         "You will be given a multi-hop question, with some context sentences, some of them are relevant to the question, some are not. "
+                         "You will be provided with some extracted insights about the queston to facilitate your understanding of the question, and possibly some demonstrations from similar questions. "
+                         "Using the information provided, write a short answer (a phrase or word) to the question. "
+                         " Return **only** the answer—no other texts such as explanations ")
+        self.assertEqual(messages[1].content,
+                         "[question]: question\n\n[question intent decomposition]:\nauthor decomposition"
+                         "\n\n[context]:\nsupporting passages")
+
     def test_author_sources_are_pinned_without_importing_training_dependencies(self):
         for relative, expected in AUTHOR_SOURCE_SHA256.items():
             self.assertEqual(hashlib.sha256((ROOT / relative).read_bytes()).hexdigest(), expected)
