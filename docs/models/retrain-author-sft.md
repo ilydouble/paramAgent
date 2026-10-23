@@ -125,3 +125,14 @@ manifest、training_source、status 及最终 verification 区分适配模式；
 不证明任务收益或显存预算；该方案属于可审计的 Qwen 扩展覆盖，不宣称唯一正确或最优。
 
 测试：`python -m unittest discover -s tests -p 'test_qwen_sft.py' -v`。
+
+## 有界QA训练链路短测
+
+`scripts/smoke_qwen_sft.py --repo-root /path/to/ParamAgent --run-dir /path/to/new/smoke --source-commit <commit>`
+仅用于训练/保存/重载验证，不是任务效果实验，也不会接着启动三域训练。要求新目录和空闲GPU，
+从原版2B起步，冻结16条QA（含已有结尾EOS的零基18635行），实际QA入口按seed1划分12训练/4验证。
+短测专属覆盖为1 epoch、累积4、验证比例0.25，共3次更新；其余保持仅注意力、r64/alpha32、lr3e-5、
+长度2048、全序列loss、EOS监督。LoRA初始化与Trainer seed42；不以短测配置替代正式训练参数。
+训练和重载是独立进程，检查有限loss/梯度、非零B权重、选定checkpoint与保存张量一致、模块范围、
+重载loss/logits有限且adapter改变logits、128-token预算下非空生成；生成未到EOS只记录，不冒称重复退化已解决。
+记录完整来源哈希/样本索引、日志、退出码、status和verification；失败就停止，不干预其他GPU进程。
