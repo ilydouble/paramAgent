@@ -69,5 +69,10 @@ python scripts/retrain_author_sft.py \
 传给真实训练进程；严格默认记录 `loss=full_sequence_pad_eos_masked`。预检样本同时保存 attention mask，
 逐行及汇总记录回答中保留/受监督的 EOS token 数。若 EOS 被长度截断，不伪造或强行补回 EOS。
 
+修正版还在编码前统一回答结尾为单个 EOS：原回答已经带 EOS 时不再重复追加，连续多个结尾 EOS
+（包括中间夹尾随空白）也合并为一个；正文内部的 EOS 不删除。训练和预检共用同一处理函数，
+审计通过 `answer_eos_normalized_row_indices` 记录受影响行。原始数据文件及行指纹不变，
+严格作者默认仍逐字保留原回答并无条件追加 EOS。已确认的 QA 零基行 18635 因此不会在修正版产生双 EOS。
+
 这是区别于作者实际 collator 行为的 **Qwen 适配修正版**，不冒称严格作者复现。
 代码修正不会修复已有权重，也未证明 EOS 掩码是重复生成的唯一原因；须用后续受控训练和推理比较验证。

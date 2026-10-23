@@ -50,6 +50,17 @@ def memory_messages(domain, question, stage="inference"):
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
+def sft_answer_text(tokenizer, answer, preserve_eos=False):
+    eos = tokenizer.eos_token
+    if not eos:
+        raise ValueError("SFT requires a configured EOS token")
+    text = answer.strip()
+    if preserve_eos:
+        while text.endswith(eos):
+            text = text[:-len(eos)].rstrip()
+    return text + eos
+
+
 def tokenize_sft(processor, tokenizer, domain, question, answer, max_seq_len, dynamic_padding=False,
                  preserve_eos=False):
     if max_seq_len <= 0 or tokenizer.pad_token_id is None:
@@ -58,7 +69,8 @@ def tokenize_sft(processor, tokenizer, domain, question, answer, max_seq_len, dy
     prompt = processor.apply_chat_template(messages, tokenize=False,
                                            add_generation_prompt=True, enable_thinking=False)
     prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
-    answer_ids = tokenizer(answer.strip() + tokenizer.eos_token, add_special_tokens=False)["input_ids"]
+    answer_ids = tokenizer(sft_answer_text(tokenizer, answer, preserve_eos),
+                           add_special_tokens=False)["input_ids"]
     input_ids = (prompt_ids + answer_ids)[:max_seq_len]
     labels = (input_ids.copy() if preserve_eos else
               [token_id if token_id != tokenizer.pad_token_id else -100 for token_id in input_ids])

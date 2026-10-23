@@ -10,7 +10,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from shared.parammem_prompts import AUTHOR_SOURCE_SHA256, ROOT, author_constants, memory_messages, tokenize_sft
+from shared.parammem_prompts import AUTHOR_SOURCE_SHA256, ROOT, author_constants, memory_messages, sft_answer_text, tokenize_sft
 
 
 def source_functions(path, names):
@@ -36,6 +36,26 @@ class Tokenizer:
 
 
 class AuthorSFTTests(unittest.TestCase):
+    def test_revised_answer_has_exactly_one_terminal_eos_without_changing_internal_eos(self):
+        for answer in ("guidance", "guidance<EOS>", "guidance<EOS><EOS>", " guidance <EOS> \n<EOS> \n"):
+            self.assertEqual(sft_answer_text(Tokenizer(), answer, preserve_eos=True), "guidance<EOS>")
+            self.assertEqual(sft_answer_text(Tokenizer(), answer), answer.strip() + "<EOS>")
+        self.assertEqual(sft_answer_text(Tokenizer(), "first<EOS>second<EOS>", preserve_eos=True),
+                         "first<EOS>second<EOS>")
+        with self.assertRaisesRegex(ValueError, "EOS"):
+            sft_answer_text(SimpleNamespace(eos_token=""), "guidance", preserve_eos=True)
+
+    def test_existing_terminal_eos_is_normalized_before_tokenization_in_all_domains(self):
+        for domain in ("code", "math", "qa"):
+            for dynamic in (False, True):
+                for answer in ("guidance", "guidance<EOS>", "guidance<EOS><EOS>"):
+                    record = tokenize_sft(Processor(), Tokenizer(), domain, "question", answer, 6,
+                                          dynamic_padding=dynamic, preserve_eos=True)
+                    self.assertEqual(record["labels"], [11, 12, 21, 0] + ([] if dynamic else [-100, -100]))
+                    clipped = tokenize_sft(Processor(), Tokenizer(), domain, "question", answer, 3,
+                                           preserve_eos=True)
+                    self.assertEqual(clipped["labels"], [11, 12, 21])
+
     def test_preserve_eos_masks_only_actual_padding_in_all_domains(self):
         for domain in ("code", "math", "qa"):
             record = tokenize_sft(Processor(), Tokenizer(), domain, "question", "guidance", 6,

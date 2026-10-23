@@ -82,6 +82,23 @@ class RetrainAuthorSFTTests(unittest.TestCase):
             revised = sft.training_command(Path("/new/run"), domain, Path("/original/2B"), preserve_eos=True)
             self.assertEqual(revised, original + ["--preserve_eos"])
 
+    def test_audit_and_training_share_terminal_eos_normalization(self):
+        class CountingTokenizer(Tokenizer):
+            def __call__(self, text, **kwargs):
+                return {"input_ids": [11, 12] if text == "prompt" else [21] + [0] * text.count("<EOS>")}
+
+        processor = SimpleNamespace(tokenizer=CountingTokenizer(), apply_chat_template=lambda *args, **kwargs: "prompt")
+        for preserve_eos in (False, True):
+            examples = [{"question": "question", "decomposition": answer}
+                        for answer in ("guidance<EOS>", "guidance", "guidance<EOS> \n<EOS>")]
+            audit, rows, sample = sft.audit_examples("qa", examples, processor, preserve_eos=preserve_eos)
+            self.assertEqual([row["answer_tokens"] for row in rows], [2, 2, 2] if preserve_eos else [3, 2, 4])
+            self.assertEqual(audit["retained_answer_eos_tokens"], 3 if preserve_eos else 6)
+            self.assertEqual(audit["supervised_answer_eos_tokens"], 3 if preserve_eos else 0)
+            self.assertEqual(audit["answer_eos_normalized_row_indices"], [0, 2] if preserve_eos else [])
+            self.assertEqual(sample["labels"][:5], [11, 12, 21, 0, -100] if preserve_eos
+                             else [11, 12, 21, -100, -100])
+
     def audit(self, prompt_tokens, preserve_eos=False):
         processor = SimpleNamespace(tokenizer=Tokenizer(prompt_tokens), apply_chat_template=lambda *args, **kwargs: "prompt")
         return sft.audit_examples("math", [{"problem": "question", "pitfalls": "guidance"}], processor,

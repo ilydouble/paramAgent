@@ -81,7 +81,7 @@ def load_training_module(domain):
 
 
 def audit_examples(domain, examples, processor, preserve_eos=False):
-    from shared.parammem_prompts import memory_messages, tokenize_sft
+    from shared.parammem_prompts import memory_messages, sft_answer_text, tokenize_sft
     config = DOMAINS[domain]
     tokenizer = processor.tokenizer
     tokenizer.pad_token = tokenizer.eos_token
@@ -98,7 +98,8 @@ def audit_examples(domain, examples, processor, preserve_eos=False):
         prompt = processor.apply_chat_template(messages, tokenize=False,
                                                add_generation_prompt=True, enable_thinking=False)
         prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
-        answer_ids = tokenizer(answer.strip() + tokenizer.eos_token, add_special_tokens=False)["input_ids"]
+        answer_text = sft_answer_text(tokenizer, answer, preserve_eos)
+        answer_ids = tokenizer(answer_text, add_special_tokens=False)["input_ids"]
         sequence_length = len(prompt_ids) + len(answer_ids)
         lengths.append(sequence_length)
         if sequence_length > 2048:
@@ -119,6 +120,7 @@ def audit_examples(domain, examples, processor, preserve_eos=False):
                       "input_ids": record["input_ids"], "labels": record["labels"],
                       "attention_mask": record["attention_mask"], "preserve_eos": preserve_eos}
         rows.append({"row_index": index, "prompt_tokens": len(prompt_ids), "answer_tokens": len(answer_ids),
+                     "answer_eos_normalized": answer_text != answer.strip() + tokenizer.eos_token,
                      "retained_answer_eos_tokens": retained_eos, "supervised_answer_eos_tokens": supervised_eos,
                      "retained_target_tokens": len(target), "sha256": hashlib.sha256(
                          json.dumps(example, sort_keys=True, ensure_ascii=False).encode()).hexdigest()})
@@ -127,6 +129,7 @@ def audit_examples(domain, examples, processor, preserve_eos=False):
     ordered = sorted(lengths)
     return {"rows": len(rows), "max_sequence_tokens": ordered[-1],
             "preserve_eos": preserve_eos,
+            "answer_eos_normalized_row_indices": [row["row_index"] for row in rows if row["answer_eos_normalized"]],
             "retained_answer_eos_tokens": sum(row["retained_answer_eos_tokens"] for row in rows),
             "supervised_answer_eos_tokens": sum(row["supervised_answer_eos_tokens"] for row in rows),
             "median_sequence_tokens": ordered[len(ordered) // 2],
