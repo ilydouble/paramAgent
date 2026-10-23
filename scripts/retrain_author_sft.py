@@ -25,6 +25,13 @@ DOMAINS = {
 }
 
 
+def training_domains(domains=None):
+    selected = list(DOMAINS) if domains is None else list(domains)
+    if not selected or len(selected) != len(set(selected)) or any(domain not in DOMAINS for domain in selected):
+        raise ValueError("Training domains must be nonempty, unique and supported")
+    return selected
+
+
 def sha256(path):
     digest = hashlib.sha256()
     with Path(path).open("rb") as stream:
@@ -151,13 +158,14 @@ def assert_frozen(run_dir):
     for name, expected in manifest["base"]["files_sha256"].items():
         if sha256(base / name) != expected:
             raise ValueError(f"Original model changed: {name}")
-    for domain in DOMAINS:
+    for domain in training_domains(manifest.get("domains")):
         record = json.loads((run_dir / domain / "training_source.json").read_text())
         if sha256(Path(record["dataset_path"])) != record["dataset_sha256"]:
             raise ValueError(f"Frozen dataset changed: {domain}")
 
 
-def preflight(repo, run_dir, preserve_eos=False, qwen_adapted=False, qwen_include_mlp=False):
+def preflight(repo, run_dir, preserve_eos=False, qwen_adapted=False, qwen_include_mlp=False, domains=None):
+    selected = training_domains(domains)
     if qwen_include_mlp and not qwen_adapted:
         raise ValueError("qwen_include_mlp requires qwen_adapted")
     from datasets import Dataset
@@ -171,6 +179,7 @@ def preflight(repo, run_dir, preserve_eos=False, qwen_adapted=False, qwen_includ
         raise ValueError("TrainingArguments would silently discard required author settings")
     base = validate_base(repo)
     manifest = {"kind": "author_training_prompts_qwen_sft", "author_commit": AUTHOR_COMMIT,
+                "domains": selected,
                 "base": base, "prompt_stage": "train", "preserve_eos": preserve_eos,
                 "qwen_adapted": qwen_adapted, "qwen_include_mlp": qwen_include_mlp,
                 "lora_policy": (POLICY if qwen_include_mlp else ATTENTION_POLICY) if qwen_adapted else "legacy_candidates",
@@ -183,7 +192,8 @@ def preflight(repo, run_dir, preserve_eos=False, qwen_adapted=False, qwen_includ
                              ("torch", "transformers", "peft", "datasets", "accelerate", "bitsandbytes")}}
     processor = AutoProcessor.from_pretrained(base["path"])
     (run_dir / "inputs").mkdir()
-    for domain, config in DOMAINS.items():
+    for domain in selected:
+        config = DOMAINS[domain]
         (run_dir / domain).mkdir()
         author_constants(domain, "train")
         author_constants(domain, "inference")
@@ -309,6 +319,8 @@ def main():
     parser.add_argument("--repo-root", type=Path, required=True)
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--train", action="store_true")
+    parser.add_argument("--domains", nargs="+", choices=DOMAINS,
+                        help="Train only these domains; default remains code math qa.")
     parser.add_argument("--preserve_eos", action="store_true",
                         help="Qwen revision: supervise real EOS tokens; mask only appended padding.")
     parser.add_argument("--qwen_adapted", action="store_true",
@@ -318,6 +330,10 @@ def main():
     parser.add_argument("--worker", choices=DOMAINS)
     parser.add_argument("--verify", choices=DOMAINS)
     args = parser.parse_args()
+    try:
+        selected = training_domains(args.domains)
+    except ValueError as error:
+        parser.error(str(error))
     if args.qwen_include_mlp and not args.qwen_adapted:
         parser.error("--qwen_include_mlp requires --qwen_adapted")
     args.preserve_eos = args.preserve_eos or args.qwen_adapted
@@ -327,20 +343,20 @@ def main():
         return
     run_dir.mkdir(parents=True, exist_ok=False)
     status = {"state": "preflight", "pid": os.getpid(), "started_utc": datetime.now(timezone.utc).isoformat(),
-              "completed": [], "training_order": list(DOMAINS), "author_training_templates": True,
+              "completed": [], "training_order": selected, "author_training_templates": True,
               "preserve_eos": args.preserve_eos}
     status["qwen_adapted"] = args.qwen_adapted
     status["qwen_include_mlp"] = args.qwen_include_mlp
     save_json(run_dir / "status.json", status)
     try:
         preflight(repo, run_dir, preserve_eos=args.preserve_eos, qwen_adapted=args.qwen_adapted,
-                  qwen_include_mlp=args.qwen_include_mlp)
+                  qwen_include_mlp=args.qwen_include_mlp, domains=args.domains)
         if not args.train:
             status["state"] = "preflight_complete"
             return
         environment = dict(os.environ, CUDA_VISIBLE_DEVICES="0", TOKENIZERS_PARALLELISM="false",
                            HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", WANDB_DISABLED="true")
-        for domain in DOMAINS:
+        for domain in selected:
             memory = int(subprocess.check_output(
                 ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"], text=True).strip())
             if memory > 256:

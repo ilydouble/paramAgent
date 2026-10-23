@@ -139,14 +139,16 @@ class RetrainAuthorSFTTests(unittest.TestCase):
                 with patch.object(sys, "argv", command), patch.object(sft, "preflight") as preflight:
                     sft.main()
                 preflight.assert_called_once_with(Path(directory).resolve(), run_dir.resolve(),
-                                                   preserve_eos=preserve_eos, qwen_adapted=False, qwen_include_mlp=False)
+                                                   preserve_eos=preserve_eos, qwen_adapted=False, qwen_include_mlp=False,
+                                                   domains=None)
                 status = json.loads((run_dir / "status.json").read_text())
                 self.assertEqual(status["state"], "preflight_complete")
                 self.assertEqual(status["preserve_eos"], preserve_eos)
 
     def test_preflight_records_same_loss_mode_in_manifest_commands_and_samples(self):
-        for preserve_eos, qwen_adapted, include_mlp in ((False, False, False), (True, False, False),
-                                                       (True, True, False), (True, True, True)):
+        for preserve_eos, qwen_adapted, include_mlp, domains in ((False, False, False, None),
+                (True, False, False, None), (True, True, False, None), (True, True, True, None),
+                (True, True, False, ["qa"])):
             with tempfile.TemporaryDirectory() as directory:
                 repo = Path(directory)
                 self.base_fixture(repo)
@@ -172,17 +174,18 @@ class RetrainAuthorSFTTests(unittest.TestCase):
                         patch.object(sft.inspect, "signature", return_value=SimpleNamespace(parameters=required)), \
                         patch.object(sft.importlib.metadata, "version", return_value="test"):
                     sft.preflight(repo, run_dir, preserve_eos=False if qwen_adapted else preserve_eos,
-                                  qwen_adapted=qwen_adapted, qwen_include_mlp=include_mlp)
+                                  qwen_adapted=qwen_adapted, qwen_include_mlp=include_mlp, domains=domains)
                 manifest = json.loads((run_dir / "manifest.json").read_text())
                 self.assertEqual(manifest["loss"], "full_sequence_padding_only_masked" if preserve_eos
                                  else "full_sequence_pad_eos_masked")
                 self.assertEqual(manifest["preserve_eos"], preserve_eos)
                 self.assertEqual(manifest["qwen_adapted"], qwen_adapted)
+                self.assertEqual(manifest["domains"], list(sft.DOMAINS) if domains is None else domains)
                 expected_policy = ("qwen35_language_projections_v1" if include_mlp
                                    else "qwen35_attention_projections_v1") if qwen_adapted else "legacy_candidates"
                 self.assertEqual(manifest["lora_policy"], expected_policy)
                 self.assertEqual(manifest["qwen_include_mlp"], include_mlp)
-                for domain in sft.DOMAINS:
+                for domain in manifest["domains"]:
                     record = json.loads((run_dir / domain / "training_source.json").read_text())
                     sample = json.loads((run_dir / domain / "prompt_sample.json").read_text())
                     self.assertEqual(record["loss"], manifest["loss"])
@@ -193,6 +196,10 @@ class RetrainAuthorSFTTests(unittest.TestCase):
                     self.assertEqual(record["qwen_include_mlp"], include_mlp)
                     self.assertEqual(record["lora_policy"], manifest["lora_policy"])
                     self.assertEqual(sample["labels"][3], 0 if preserve_eos else -100)
+                if domains == ["qa"]:
+                    self.assertFalse((run_dir / "code").exists())
+                    self.assertFalse((run_dir / "math").exists())
+                    self.assertFalse((run_dir / "inputs/code.jsonl").exists())
 
     def test_qwen_launcher_enables_eos_and_records_mode_without_training(self):
         for include_mlp in (False, True):
@@ -204,12 +211,38 @@ class RetrainAuthorSFTTests(unittest.TestCase):
                 with patch.object(sys, "argv", command), patch.object(sft, "preflight") as preflight:
                     sft.main()
                 preflight.assert_called_once_with(Path(directory).resolve(), run_dir.resolve(),
-                                                   preserve_eos=True, qwen_adapted=True, qwen_include_mlp=include_mlp)
+                                                   preserve_eos=True, qwen_adapted=True, qwen_include_mlp=include_mlp,
+                                                   domains=None)
                 status = json.loads((run_dir / "status.json").read_text())
                 self.assertEqual(status["state"], "preflight_complete")
                 self.assertTrue(status["qwen_adapted"])
                 self.assertTrue(status["preserve_eos"])
                 self.assertEqual(status["qwen_include_mlp"], include_mlp)
+
+    def test_only_qa_launcher_and_frozen_checks_do_not_require_other_domains(self):
+        self.assertEqual(sft.training_domains(["qa"]), ["qa"])
+        self.assertEqual(sft.training_domains(), ["code", "math", "qa"])
+        for invalid in ([], ["qa", "qa"], ["unsupported"]):
+            with self.assertRaises(ValueError):
+                sft.training_domains(invalid)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            base = self.base_fixture(root)
+            manifest = {"base": sft.validate_base(root), "source_sha256": {}, "domains": ["qa"]}
+            (root / "manifest.json").write_text(json.dumps(manifest))
+            (root / "qa").mkdir()
+            data = root / "qa/data.json"
+            data.write_text("[]")
+            (root / "qa/training_source.json").write_text(json.dumps(
+                {"dataset_path": str(data), "dataset_sha256": sft.sha256(data)}))
+            sft.assert_frozen(root)
+            run_dir = root / "new-run"
+            command = ["retrain", "--repo-root", directory, "--run-dir", str(run_dir),
+                       "--domains", "qa", "--qwen_adapted"]
+            with patch.object(sys, "argv", command), patch.object(sft, "preflight") as preflight:
+                sft.main()
+            self.assertEqual(preflight.call_args.kwargs["domains"], ["qa"])
+            self.assertEqual(json.loads((run_dir / "status.json").read_text())["training_order"], ["qa"])
 
     def test_worker_uses_recorded_training_flag_instead_of_losing_it_in_subprocess(self):
         for preserve_eos, qwen_adapted, include_mlp in ((False, False, False), (True, False, False),
