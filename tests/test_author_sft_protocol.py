@@ -36,6 +36,60 @@ class Tokenizer:
 
 
 class AuthorSFTTests(unittest.TestCase):
+    def test_preserve_eos_masks_only_actual_padding_in_all_domains(self):
+        for domain in ("code", "math", "qa"):
+            record = tokenize_sft(Processor(), Tokenizer(), domain, "question", "guidance", 6,
+                                  preserve_eos=True)
+            self.assertEqual(record["input_ids"], [11, 12, 21, 0, 0, 0])
+            self.assertEqual(record["labels"], [11, 12, 21, 0, -100, -100])
+            self.assertEqual(record["attention_mask"], [1, 1, 1, 1, 0, 0])
+
+    def test_preserve_eos_dynamic_and_truncation_do_not_invent_terminal_tokens(self):
+        for dynamic in (False, True):
+            for limit, expected in ((3, [11, 12, 21]), (4, [11, 12, 21, 0])):
+                record = tokenize_sft(Processor(), Tokenizer(), "qa", "question", "guidance", limit,
+                                      dynamic_padding=dynamic, preserve_eos=True)
+                self.assertEqual(record["labels"], expected)
+                self.assertEqual(record["input_ids"], expected)
+                if dynamic:
+                    self.assertEqual(record["length"], limit)
+
+    def test_preserve_eos_also_keeps_real_chat_turn_endings_in_prompt(self):
+        tokenizer = lambda text, **kwargs: {"input_ids": [11, 0, 12] if text == "rendered prompt" else [21, 0]}
+        tokenizer.pad_token_id = 0
+        tokenizer.eos_token = "<EOS>"
+        record = tokenize_sft(Processor(), tokenizer, "qa", "question", "guidance", 6, preserve_eos=True)
+        self.assertEqual(record["labels"], [11, 0, 12, 21, 0, -100])
+
+    def test_training_entrypoints_forward_opt_in_flag_and_dynamic_collators_keep_eos(self):
+        for domain, label, question, answer in (("code", "Code", "func_sign", "answer"),
+                                                ("math", "Math", "problem", "pitfalls"),
+                                                ("qa", "QA", "question", "decomposition")):
+            path = ROOT / domain / f"LoRA_Qwen35_{label}_4090.py"
+            parse_args = source_functions(path, {"parse_args"})["parse_args"]
+            with patch.object(sys, "argv", [str(path), "--preserve_eos", "--dynamic_padding"]):
+                args = parse_args()
+            self.assertTrue(args.preserve_eos)
+            args.max_seq_len = 6
+            tree = ast.parse(path.read_text())
+            tokenize = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+                            and node.name == "tokenize")
+            collator = next(node for node in tree.body if isinstance(node, ast.ClassDef)
+                            and node.name == "DynamicCausalLMCollator")
+            future = ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0)
+            namespace = {"args": args, "processor": Processor(), "tokenizer": Tokenizer(),
+                         "tokenize_sft": tokenize_sft,
+                         "torch": SimpleNamespace(long="long", tensor=lambda values, **kwargs: values)}
+            exec(compile(ast.fix_missing_locations(ast.Module(body=[future, tokenize, collator], type_ignores=[])),
+                         str(path), "exec"), namespace)
+            record = namespace["tokenize"]({question: "question", answer: "guidance"})
+            self.assertEqual(record["labels"], [11, 12, 21, 0])
+            short = {"input_ids": [21, 0], "attention_mask": [1, 1], "labels": [21, 0]}
+            batch = namespace["DynamicCausalLMCollator"](0)([record, short])
+            self.assertEqual(batch["labels"], [[11, 12, 21, 0, -100, -100, -100, -100],
+                                               [21, 0, -100, -100, -100, -100, -100, -100]])
+            self.assertEqual(batch["attention_mask"][1], [1, 1, 0, 0, 0, 0, 0, 0])
+
     def test_independent_inference_entrypoints_use_author_inference_messages(self):
         for domain, label in (("code", "Code"), ("math", "Math"), ("qa", "QA")):
             path = ROOT / domain / f"LoRA_Qwen35_{label}_4090_inference.py"
@@ -163,6 +217,7 @@ class AuthorSFTTests(unittest.TestCase):
             with patch.object(sys, "argv", [str(path)]):
                 args = parse_args()
             self.assertEqual((args.lora_r, args.lora_alpha, args.val_ratio, args.seed), (64, 32, 0.15, 1))
+            self.assertFalse(args.preserve_eos)
             self.assertEqual(args.num_epochs, 2 if domain == "math" else 3)
             self.assertEqual(args.lr, 1.5e-5 if domain == "math" else 3e-5)
             self.assertEqual(args.per_device_batch_size * args.grad_accum_steps, 128 if domain == "math" else 96)

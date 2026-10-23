@@ -68,6 +68,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--grad_accum_steps", type=int, default=96)
     parser.add_argument("--lr", type=float, default=3e-5)
     parser.add_argument("--max_seq_len", type=int, default=2048)
+    parser.add_argument("--preserve_eos", action="store_true",
+                        help="Qwen revision: supervise real EOS tokens; mask only appended padding.")
     parser.add_argument(
         "--dynamic_padding",
         action="store_true",
@@ -196,7 +198,8 @@ def main() -> None:
 
     def tokenize(example: dict[str, Any]) -> dict[str, list[int]]:
         return tokenize_sft(processor, tokenizer, "qa", example["question"],
-                            example["decomposition"], args.max_seq_len, args.dynamic_padding)
+                            example["decomposition"], args.max_seq_len, args.dynamic_padding,
+                            preserve_eos=args.preserve_eos)
 
     train_data = split["train"].map(tokenize, remove_columns=split["train"].column_names)
     eval_data = split["test"].map(tokenize, remove_columns=split["test"].column_names)

@@ -50,7 +50,8 @@ def memory_messages(domain, question, stage="inference"):
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
-def tokenize_sft(processor, tokenizer, domain, question, answer, max_seq_len, dynamic_padding=False):
+def tokenize_sft(processor, tokenizer, domain, question, answer, max_seq_len, dynamic_padding=False,
+                 preserve_eos=False):
     if max_seq_len <= 0 or tokenizer.pad_token_id is None:
         raise ValueError("SFT requires a positive sequence length and a configured padding token")
     messages = memory_messages(domain, question, stage="train")
@@ -59,7 +60,8 @@ def tokenize_sft(processor, tokenizer, domain, question, answer, max_seq_len, dy
     prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
     answer_ids = tokenizer(answer.strip() + tokenizer.eos_token, add_special_tokens=False)["input_ids"]
     input_ids = (prompt_ids + answer_ids)[:max_seq_len]
-    labels = [token_id if token_id != tokenizer.pad_token_id else -100 for token_id in input_ids]
+    labels = (input_ids.copy() if preserve_eos else
+              [token_id if token_id != tokenizer.pad_token_id else -100 for token_id in input_ids])
     result = {"input_ids": input_ids, "attention_mask": [1] * len(input_ids), "labels": labels}
     if dynamic_padding:
         result["length"] = len(input_ids)

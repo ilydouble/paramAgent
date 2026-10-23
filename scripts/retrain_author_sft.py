@@ -58,15 +58,18 @@ def validate_base(repo):
             "weights": weights, "files_sha256": {name: sha256(base / name) for name in sorted(files)}}
 
 
-def training_command(run_dir, domain, base):
+def training_command(run_dir, domain, base, preserve_eos=False):
     config = DOMAINS[domain]
-    return [sys.executable, "-u", str(SOURCE / domain / f"LoRA_Qwen35_{config['label']}_4090.py"),
+    command = [sys.executable, "-u", str(SOURCE / domain / f"LoRA_Qwen35_{config['label']}_4090.py"),
             "--base_model", str(base), "--dataset_path", str(run_dir / "inputs" / f"{domain}.jsonl"),
             "--output_dir", str(run_dir / "adapters" / domain),
             "--num_epochs", str(config["epochs"]), "--per_device_batch_size", "1",
             "--grad_accum_steps", str(config["accumulation"]), "--lr", str(config["lr"]),
             "--lora_r", "64", "--lora_alpha", "32", "--lora_dropout", "0.05",
             "--max_seq_len", "2048", "--val_ratio", "0.15", "--seed", "1", "--warmup_ratio", "0.03"]
+    if preserve_eos:
+        command.append("--preserve_eos")
+    return command
 
 
 def load_training_module(domain):
@@ -77,7 +80,7 @@ def load_training_module(domain):
     return module
 
 
-def audit_examples(domain, examples, processor):
+def audit_examples(domain, examples, processor, preserve_eos=False):
     from shared.parammem_prompts import memory_messages, tokenize_sft
     config = DOMAINS[domain]
     tokenizer = processor.tokenizer
@@ -103,20 +106,29 @@ def audit_examples(domain, examples, processor):
         target = answer_ids[:max(0, 2048 - len(prompt_ids))]
         if not any(token != tokenizer.pad_token_id for token in target):
             no_target.append(index)
+        retained_eos = target.count(tokenizer.eos_token_id)
+        supervised_eos = retained_eos if preserve_eos or tokenizer.eos_token_id != tokenizer.pad_token_id else 0
         if index == 0:
-            record = tokenize_sft(processor, tokenizer, domain, question, answer, 2048)
-            if record["labels"] != [token if token != tokenizer.pad_token_id else -100
-                                    for token in record["input_ids"]]:
-                raise ValueError("Author full-sequence loss invariant failed")
+            record = tokenize_sft(processor, tokenizer, domain, question, answer, 2048,
+                                  preserve_eos=preserve_eos)
+            expected_labels = [token if (active if preserve_eos else token != tokenizer.pad_token_id) else -100
+                               for token, active in zip(record["input_ids"], record["attention_mask"])]
+            if record["labels"] != expected_labels:
+                raise ValueError("SFT full-sequence loss invariant failed")
             sample = {"messages": messages, "rendered_prompt": prompt, "answer": answer,
-                      "input_ids": record["input_ids"], "labels": record["labels"]}
+                      "input_ids": record["input_ids"], "labels": record["labels"],
+                      "attention_mask": record["attention_mask"], "preserve_eos": preserve_eos}
         rows.append({"row_index": index, "prompt_tokens": len(prompt_ids), "answer_tokens": len(answer_ids),
+                     "retained_answer_eos_tokens": retained_eos, "supervised_answer_eos_tokens": supervised_eos,
                      "retained_target_tokens": len(target), "sha256": hashlib.sha256(
                          json.dumps(example, sort_keys=True, ensure_ascii=False).encode()).hexdigest()})
     if not lengths:
         raise ValueError(f"{domain}: empty dataset")
     ordered = sorted(lengths)
     return {"rows": len(rows), "max_sequence_tokens": ordered[-1],
+            "preserve_eos": preserve_eos,
+            "retained_answer_eos_tokens": sum(row["retained_answer_eos_tokens"] for row in rows),
+            "supervised_answer_eos_tokens": sum(row["supervised_answer_eos_tokens"] for row in rows),
             "median_sequence_tokens": ordered[len(ordered) // 2],
             "truncated_row_indices": truncated, "no_target_row_indices": no_target}, rows, sample
 
@@ -136,7 +148,7 @@ def assert_frozen(run_dir):
             raise ValueError(f"Frozen dataset changed: {domain}")
 
 
-def preflight(repo, run_dir):
+def preflight(repo, run_dir, preserve_eos=False):
     from datasets import Dataset
     from transformers import AutoProcessor, TrainingArguments
     from shared.parammem_prompts import AUTHOR_COMMIT, author_constants
@@ -146,7 +158,8 @@ def preflight(repo, run_dir):
         raise ValueError("TrainingArguments would silently discard required author settings")
     base = validate_base(repo)
     manifest = {"kind": "author_training_prompts_qwen_sft", "author_commit": AUTHOR_COMMIT,
-                "base": base, "prompt_stage": "train", "loss": "full_sequence_pad_eos_masked",
+                "base": base, "prompt_stage": "train", "preserve_eos": preserve_eos,
+                "loss": "full_sequence_padding_only_masked" if preserve_eos else "full_sequence_pad_eos_masked",
                 "split_seed": 1, "trainer_and_initialization_seed": 42, "max_seq_len": 2048,
                 "qwen_adaptation": "native chat, thinking disabled, single-GPU NF4/BF16, discovered text LoRA modules",
                 "data_limit": "existing local datasets, not certified identical to the author's Llama training data",
@@ -166,7 +179,7 @@ def preflight(repo, run_dir):
             raise ValueError("Dataset changed during snapshot")
         module = load_training_module(domain)
         examples = getattr(module, config["loader"])(str(frozen))
-        audit, row_manifest, sample = audit_examples(domain, examples, processor)
+        audit, row_manifest, sample = audit_examples(domain, examples, processor, preserve_eos=preserve_eos)
         save_json(run_dir / domain / "length_audit.json", audit)
         save_json(run_dir / domain / "rows.json", row_manifest)
         save_json(run_dir / domain / "prompt_sample.json", sample)
@@ -177,7 +190,9 @@ def preflight(repo, run_dir):
         save_json(run_dir / domain / "split.json", {name: split[name]["row_index"][:] for name in split})
         record = {"domain": domain, "dataset_path": str(frozen), "original_dataset": str(original),
                   "dataset_sha256": sha256(frozen), "rows": len(examples), "train_rows": len(split["train"]),
-                  "eval_rows": len(split["test"]), "command": training_command(run_dir, domain, base["path"]),
+                  "eval_rows": len(split["test"]),
+                  "command": training_command(run_dir, domain, base["path"], preserve_eos=preserve_eos),
+                  "preserve_eos": preserve_eos, "loss": manifest["loss"],
                   "prompt_stage": "train", "train_inference_difference": "preserved exactly as author",
                   "initialization_seed": 42, "trainer_seed": 42, "split_seed": 1}
         save_json(run_dir / domain / "training_source.json", record)
@@ -252,6 +267,7 @@ def verify_worker(run_dir, domain):
         raise ValueError("SFT smoke response is empty")
     save_json(run_dir / domain / "verification.json", {
         "status": "verified", "base_model": base, "adapter_sha256": sha256(adapter / "adapter_model.safetensors"),
+        "preserve_eos": manifest.get("preserve_eos", False), "loss": manifest["loss"],
         "epochs": state["epoch"], "global_step": state["global_step"],
         "best_checkpoint": state["best_model_checkpoint"], "best_checkpoint_tensors_match": True,
         "max_logit_delta_from_original": delta, "smoke_response": response,
@@ -263,6 +279,8 @@ def main():
     parser.add_argument("--repo-root", type=Path, required=True)
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--train", action="store_true")
+    parser.add_argument("--preserve_eos", action="store_true",
+                        help="Qwen revision: supervise real EOS tokens; mask only appended padding.")
     parser.add_argument("--worker", choices=DOMAINS)
     parser.add_argument("--verify", choices=DOMAINS)
     args = parser.parse_args()
@@ -272,10 +290,11 @@ def main():
         return
     run_dir.mkdir(parents=True, exist_ok=False)
     status = {"state": "preflight", "pid": os.getpid(), "started_utc": datetime.now(timezone.utc).isoformat(),
-              "completed": [], "training_order": list(DOMAINS), "author_training_templates": True}
+              "completed": [], "training_order": list(DOMAINS), "author_training_templates": True,
+              "preserve_eos": args.preserve_eos}
     save_json(run_dir / "status.json", status)
     try:
-        preflight(repo, run_dir)
+        preflight(repo, run_dir, preserve_eos=args.preserve_eos)
         if not args.train:
             status["state"] = "preflight_complete"
             return

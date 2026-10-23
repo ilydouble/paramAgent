@@ -2,8 +2,10 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+import sys
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 
 SOURCE = Path(__file__).resolve().parents[1]
@@ -14,6 +16,7 @@ spec.loader.exec_module(sft)
 
 class Tokenizer:
     eos_token = "<EOS>"
+    eos_token_id = 0
     pad_token_id = 0
 
     def __init__(self, prompt_tokens=2):
@@ -71,10 +74,105 @@ class RetrainAuthorSFTTests(unittest.TestCase):
                              ("64", "32", "2048"))
             self.assertEqual((values["--val_ratio"], values["--seed"]), ("0.15", "1"))
             self.assertNotIn("--resume_from_checkpoint", values)
+            self.assertNotIn("--preserve_eos", command)
 
-    def audit(self, prompt_tokens):
+    def test_revised_commands_pass_explicit_flag_to_every_domain(self):
+        for domain in sft.DOMAINS:
+            original = sft.training_command(Path("/new/run"), domain, Path("/original/2B"))
+            revised = sft.training_command(Path("/new/run"), domain, Path("/original/2B"), preserve_eos=True)
+            self.assertEqual(revised, original + ["--preserve_eos"])
+
+    def audit(self, prompt_tokens, preserve_eos=False):
         processor = SimpleNamespace(tokenizer=Tokenizer(prompt_tokens), apply_chat_template=lambda *args, **kwargs: "prompt")
-        return sft.audit_examples("math", [{"problem": "question", "pitfalls": "guidance"}], processor)
+        return sft.audit_examples("math", [{"problem": "question", "pitfalls": "guidance"}], processor,
+                                  preserve_eos=preserve_eos)
+
+    def test_revised_audit_records_actual_eos_supervision_and_padding(self):
+        for preserve_eos in (False, True):
+            audit, rows, sample = self.audit(2, preserve_eos=preserve_eos)
+            self.assertEqual(audit["preserve_eos"], preserve_eos)
+            self.assertEqual(audit["retained_answer_eos_tokens"], 1)
+            self.assertEqual(audit["supervised_answer_eos_tokens"], int(preserve_eos))
+            self.assertEqual(rows[0]["supervised_answer_eos_tokens"], int(preserve_eos))
+            self.assertEqual(sample["labels"][:5], [11, 11, 21, 0 if preserve_eos else -100, -100])
+            self.assertEqual(sample["attention_mask"][:5], [1, 1, 1, 1, 0])
+
+    def test_revised_audit_reports_eos_clipping_without_inventing_supervision(self):
+        for prompt_tokens, retained_eos in ((2046, 1), (2047, 0), (2048, 0)):
+            audit, rows, _ = self.audit(prompt_tokens, preserve_eos=True)
+            self.assertEqual(audit["retained_answer_eos_tokens"], retained_eos)
+            self.assertEqual(audit["supervised_answer_eos_tokens"], retained_eos)
+            self.assertEqual(rows[0]["retained_answer_eos_tokens"], retained_eos)
+            self.assertEqual(audit["no_target_row_indices"], [0] if prompt_tokens == 2048 else [])
+
+    def test_launcher_forwards_mode_to_preflight_and_status_without_training(self):
+        for preserve_eos in (False, True):
+            with tempfile.TemporaryDirectory() as directory:
+                run_dir = Path(directory) / "new-run"
+                command = ["retrain", "--repo-root", directory, "--run-dir", str(run_dir)]
+                if preserve_eos:
+                    command.append("--preserve_eos")
+                with patch.object(sys, "argv", command), patch.object(sft, "preflight") as preflight:
+                    sft.main()
+                preflight.assert_called_once_with(Path(directory).resolve(), run_dir.resolve(),
+                                                   preserve_eos=preserve_eos)
+                status = json.loads((run_dir / "status.json").read_text())
+                self.assertEqual(status["state"], "preflight_complete")
+                self.assertEqual(status["preserve_eos"], preserve_eos)
+
+    def test_preflight_records_same_loss_mode_in_manifest_commands_and_samples(self):
+        for preserve_eos in (False, True):
+            with tempfile.TemporaryDirectory() as directory:
+                repo = Path(directory)
+                self.base_fixture(repo)
+                run_dir = repo / "run"
+                run_dir.mkdir()
+                modules = {}
+                for domain, config in sft.DOMAINS.items():
+                    data = repo / "dataset" / config["dataset"]
+                    data.parent.mkdir(parents=True)
+                    examples = [{config["question"]: "question", config["answer"]: "guidance"}] * 2
+                    data.write_text(json.dumps(examples))
+                    modules[domain] = SimpleNamespace(**{config["loader"]: lambda path: json.loads(Path(path).read_text())})
+                dataset = SimpleNamespace()
+                dataset.shuffle = lambda **kwargs: dataset
+                dataset.train_test_split = lambda **kwargs: {"train": {"row_index": [0]}, "test": {"row_index": [1]}}
+                processor = SimpleNamespace(tokenizer=Tokenizer(), apply_chat_template=lambda *args, **kwargs: "prompt")
+                dependencies = {"datasets": SimpleNamespace(Dataset=SimpleNamespace(from_dict=lambda rows: dataset)),
+                                "transformers": SimpleNamespace(TrainingArguments=type("Arguments", (), {}),
+                                    AutoProcessor=SimpleNamespace(from_pretrained=lambda path: processor))}
+                required = {"eval_strategy", "save_strategy", "load_best_model_at_end", "warmup_steps", "optim",
+                            "gradient_accumulation_steps", "lr_scheduler_type", "bf16", "gradient_checkpointing"}
+                with patch.dict(sys.modules, dependencies), patch.object(sft, "load_training_module", modules.get), \
+                        patch.object(sft.inspect, "signature", return_value=SimpleNamespace(parameters=required)), \
+                        patch.object(sft.importlib.metadata, "version", return_value="test"):
+                    sft.preflight(repo, run_dir, preserve_eos=preserve_eos)
+                manifest = json.loads((run_dir / "manifest.json").read_text())
+                self.assertEqual(manifest["loss"], "full_sequence_padding_only_masked" if preserve_eos
+                                 else "full_sequence_pad_eos_masked")
+                self.assertEqual(manifest["preserve_eos"], preserve_eos)
+                for domain in sft.DOMAINS:
+                    record = json.loads((run_dir / domain / "training_source.json").read_text())
+                    sample = json.loads((run_dir / domain / "prompt_sample.json").read_text())
+                    self.assertEqual(record["loss"], manifest["loss"])
+                    self.assertEqual(record["preserve_eos"], preserve_eos)
+                    self.assertEqual("--preserve_eos" in record["command"], preserve_eos)
+                    self.assertEqual(sample["labels"][3], 0 if preserve_eos else -100)
+
+    def test_worker_uses_recorded_training_flag_instead_of_losing_it_in_subprocess(self):
+        for preserve_eos in (False, True):
+            with tempfile.TemporaryDirectory() as directory:
+                run_dir = Path(directory)
+                (run_dir / "qa").mkdir()
+                command = sft.training_command(run_dir, "qa", Path("/base"), preserve_eos=preserve_eos)
+                (run_dir / "qa/training_source.json").write_text(json.dumps({"command": command}))
+                captured = []
+                module = SimpleNamespace(main=lambda: captured.append(sys.argv[:]))
+                with patch.dict(sys.modules, {"transformers": SimpleNamespace(set_seed=lambda seed: None)}), \
+                        patch.object(sft, "assert_frozen"), patch.object(sft, "load_training_module", return_value=module), \
+                        patch.object(sys, "argv", []):
+                    sft.train_worker(run_dir, "qa")
+                self.assertEqual(captured, [command[2:]])
 
     def test_audit_checks_full_sequence_loss_and_records_author_train_prompt(self):
         audit, rows, sample = self.audit(2)

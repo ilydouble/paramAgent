@@ -1,6 +1,7 @@
 # 三域作者训练模板 SFT 重训
 
 用户于 2026-10-23 明确选择严格保留作者的训练/推理模板区别，不采用二者完全相同的修正版。
+默认仍采用严格作者损失；2026-10-24 新增可选 EOS 监督修正版，须显式启用并独立记录。
 `scripts/retrain_author_sft.py` 从有下载来源记录的原版 `Qwen/Qwen3.5-2B` 分别训练新 Code、Math、QA adapter，
 不从旧 SFT 继续训练，不覆盖旧 SFT/DPO，不自动启动 DPO，也不直接将旧 DPO 挂到新 SFT 上。
 
@@ -48,3 +49,25 @@ Code → Math → QA 单卡串行，每域结束后使用独立进程验证：�
 来源清单保存原版模型权重、tokenizer/processor/chat template、源码和环境版本，不写入远程 Git 仓库。
 
 测试：`python -m unittest discover -s tests -p 'test_retrain_author_sft.py' -v`。
+
+## 可选：保留真实 EOS 监督
+
+Qwen 训练设置 `pad_token=eos_token`。默认作者行为按 token ID 屏蔽，连真实回答末尾 EOS
+也置为 `-100`。显式加入 `--preserve_eos` 后，先为未填充序列保留全部标签，只把后续补齐位置
+置为 `-100`；真实 EOS（包括 prompt 内的轮次结束符）参与损失。固定/动态 padding 均支持。
+这仍是 prompt + 回答的全序列监督，不改为 completion-only，不修改模板、示例、超参数或推理停止符。
+
+```bash
+python scripts/retrain_author_sft.py \
+  --repo-root /path/to/ParamAgent \
+  --run-dir /path/to/new/eos-supervised-run --preserve_eos
+```
+
+上述命令仅预检；明确需要训练时再加 `--train`。三个 `LoRA_Qwen35_*_4090.py` 独立入口也支持
+同名开关，须显式指定新的 `--output_dir`，不覆盖旧版产物，也不要从旧损失协议 checkpoint 续训。
+启动器要求全新目录，记录 `preserve_eos` 及 `loss=full_sequence_padding_only_masked`，并将开关
+传给真实训练进程；严格默认记录 `loss=full_sequence_pad_eos_masked`。预检样本同时保存 attention mask，
+逐行及汇总记录回答中保留/受监督的 EOS token 数。若 EOS 被长度截断，不伪造或强行补回 EOS。
+
+这是区别于作者实际 collator 行为的 **Qwen 适配修正版**，不冒称严格作者复现。
+代码修正不会修复已有权重，也未证明 EOS 掩码是重复生成的唯一原因；须用后续受控训练和推理比较验证。
