@@ -58,7 +58,7 @@ def validate_base(repo):
             "weights": weights, "files_sha256": {name: sha256(base / name) for name in sorted(files)}}
 
 
-def training_command(run_dir, domain, base, preserve_eos=False):
+def training_command(run_dir, domain, base, preserve_eos=False, qwen_adapted=False):
     config = DOMAINS[domain]
     command = [sys.executable, "-u", str(SOURCE / domain / f"LoRA_Qwen35_{config['label']}_4090.py"),
             "--base_model", str(base), "--dataset_path", str(run_dir / "inputs" / f"{domain}.jsonl"),
@@ -67,8 +67,10 @@ def training_command(run_dir, domain, base, preserve_eos=False):
             "--grad_accum_steps", str(config["accumulation"]), "--lr", str(config["lr"]),
             "--lora_r", "64", "--lora_alpha", "32", "--lora_dropout", "0.05",
             "--max_seq_len", "2048", "--val_ratio", "0.15", "--seed", "1", "--warmup_ratio", "0.03"]
-    if preserve_eos:
+    if preserve_eos or qwen_adapted:
         command.append("--preserve_eos")
+    if qwen_adapted:
+        command.append("--qwen_adapted")
     return command
 
 
@@ -151,10 +153,12 @@ def assert_frozen(run_dir):
             raise ValueError(f"Frozen dataset changed: {domain}")
 
 
-def preflight(repo, run_dir, preserve_eos=False):
+def preflight(repo, run_dir, preserve_eos=False, qwen_adapted=False):
     from datasets import Dataset
     from transformers import AutoProcessor, TrainingArguments
     from shared.parammem_prompts import AUTHOR_COMMIT, author_constants
+    from shared.qwen_sft import POLICY
+    preserve_eos = preserve_eos or qwen_adapted
     required = {"eval_strategy", "save_strategy", "load_best_model_at_end", "warmup_steps",
                 "optim", "gradient_accumulation_steps", "lr_scheduler_type", "bf16", "gradient_checkpointing"}
     if required - set(inspect.signature(TrainingArguments.__init__).parameters):
@@ -162,6 +166,7 @@ def preflight(repo, run_dir, preserve_eos=False):
     base = validate_base(repo)
     manifest = {"kind": "author_training_prompts_qwen_sft", "author_commit": AUTHOR_COMMIT,
                 "base": base, "prompt_stage": "train", "preserve_eos": preserve_eos,
+                "qwen_adapted": qwen_adapted, "lora_policy": POLICY if qwen_adapted else "legacy_candidates",
                 "loss": "full_sequence_padding_only_masked" if preserve_eos else "full_sequence_pad_eos_masked",
                 "split_seed": 1, "trainer_and_initialization_seed": 42, "max_seq_len": 2048,
                 "qwen_adaptation": "native chat, thinking disabled, single-GPU NF4/BF16, discovered text LoRA modules",
@@ -194,7 +199,9 @@ def preflight(repo, run_dir, preserve_eos=False):
         record = {"domain": domain, "dataset_path": str(frozen), "original_dataset": str(original),
                   "dataset_sha256": sha256(frozen), "rows": len(examples), "train_rows": len(split["train"]),
                   "eval_rows": len(split["test"]),
-                  "command": training_command(run_dir, domain, base["path"], preserve_eos=preserve_eos),
+                  "command": training_command(run_dir, domain, base["path"], preserve_eos=preserve_eos,
+                                              qwen_adapted=qwen_adapted),
+                  "qwen_adapted": qwen_adapted, "lora_policy": manifest["lora_policy"],
                   "preserve_eos": preserve_eos, "loss": manifest["loss"],
                   "prompt_stage": "train", "train_inference_difference": "preserved exactly as author",
                   "initialization_seed": 42, "trainer_seed": 42, "split_seed": 1}
@@ -248,6 +255,14 @@ def verify_worker(run_dir, domain):
     model = AutoModelForMultimodalLM.from_pretrained(base, quantization_config=quantization,
                                                     dtype=torch.bfloat16, device_map={"": 0})
     model = PeftModel.from_pretrained(model, adapter).eval()
+    qwen_coverage = None
+    if manifest.get("qwen_adapted", False):
+        from shared.qwen_sft import qwen_lora_plan, verify_qwen_lora
+        coverage = json.loads((adapter / "qwen_lora_coverage.json").read_text())
+        plan = qwen_lora_plan(model.get_base_model())
+        if coverage["targets"] != plan["targets"] or config["target_modules"] != plan["target_regex"]:
+            raise ValueError("Saved Qwen LoRA coverage differs from reloaded architecture")
+        qwen_coverage = verify_qwen_lora(model, plan, require_trainable=False)
     processor = AutoProcessor.from_pretrained(base)
     tokenizer = processor.tokenizer
     question = {"code": "def add(a: int, b: int) -> int:\n    \"\"\"Return their sum.\"\"\"",
@@ -271,6 +286,7 @@ def verify_worker(run_dir, domain):
     save_json(run_dir / domain / "verification.json", {
         "status": "verified", "base_model": base, "adapter_sha256": sha256(adapter / "adapter_model.safetensors"),
         "preserve_eos": manifest.get("preserve_eos", False), "loss": manifest["loss"],
+        "qwen_adapted": manifest.get("qwen_adapted", False), "qwen_lora_coverage": qwen_coverage,
         "epochs": state["epoch"], "global_step": state["global_step"],
         "best_checkpoint": state["best_model_checkpoint"], "best_checkpoint_tensors_match": True,
         "max_logit_delta_from_original": delta, "smoke_response": response,
@@ -284,9 +300,12 @@ def main():
     parser.add_argument("--train", action="store_true")
     parser.add_argument("--preserve_eos", action="store_true",
                         help="Qwen revision: supervise real EOS tokens; mask only appended padding.")
+    parser.add_argument("--qwen_adapted", action="store_true",
+                        help="Fresh-run Qwen3.5 language projection coverage, including EOS supervision.")
     parser.add_argument("--worker", choices=DOMAINS)
     parser.add_argument("--verify", choices=DOMAINS)
     args = parser.parse_args()
+    args.preserve_eos = args.preserve_eos or args.qwen_adapted
     repo, run_dir = args.repo_root.resolve(), args.run_dir.resolve()
     if args.worker or args.verify:
         (train_worker if args.worker else verify_worker)(run_dir, args.worker or args.verify)
@@ -295,9 +314,10 @@ def main():
     status = {"state": "preflight", "pid": os.getpid(), "started_utc": datetime.now(timezone.utc).isoformat(),
               "completed": [], "training_order": list(DOMAINS), "author_training_templates": True,
               "preserve_eos": args.preserve_eos}
+    status["qwen_adapted"] = args.qwen_adapted
     save_json(run_dir / "status.json", status)
     try:
-        preflight(repo, run_dir, preserve_eos=args.preserve_eos)
+        preflight(repo, run_dir, preserve_eos=args.preserve_eos, qwen_adapted=args.qwen_adapted)
         if not args.train:
             status["state"] = "preflight_complete"
             return

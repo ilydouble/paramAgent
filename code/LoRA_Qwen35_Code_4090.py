@@ -21,6 +21,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from shared.parammem_prompts import author_constants, tokenize_sft
+from shared.qwen_sft import qwen_lora_plan, save_qwen_lora_report
 
 import torch
 from datasets import Dataset
@@ -70,6 +71,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max_seq_len", type=int, default=2048)
     parser.add_argument("--preserve_eos", action="store_true",
                         help="Qwen revision: supervise real EOS tokens; mask only appended padding.")
+    parser.add_argument("--qwen_adapted", action="store_true",
+                        help="Fresh-run Qwen3.5 language projection coverage, including EOS supervision.")
     parser.add_argument(
         "--dynamic_padding",
         action="store_true",
@@ -87,7 +90,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--resume_from_checkpoint", default=None, help="Path to a checkpoint directory to resume training from")
     parser.add_argument("--val_ratio", type=float, default=0.15)
     parser.add_argument("--seed", type=int, default=1)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.qwen_adapted:
+        args.preserve_eos = True
+        if args.output_dir == parser.get_default("output_dir"):
+            args.output_dir = args.output_dir.replace("-author-sft", "-qwen-adapted-sft")
+        if args.resume_from_checkpoint or Path(args.output_dir).exists():
+            parser.error("--qwen_adapted requires a new output directory and no resume checkpoint")
+    return args
 
 
 def _normalize_func_sign(item: dict) -> str:
@@ -196,7 +206,8 @@ def main() -> None:
         device_map={"": 0},
     )
     model = prepare_model_for_kbit_training(model)
-    targets = select_lora_modules(model)
+    qwen_plan = qwen_lora_plan(model) if args.qwen_adapted else None
+    targets = qwen_plan["target_regex"] if qwen_plan else select_lora_modules(model)
     print(f"LoRA target modules: {targets}")
     model = get_peft_model(
         model,
@@ -209,6 +220,8 @@ def main() -> None:
             task_type="CAUSAL_LM",
         ),
     )
+    if qwen_plan:
+        save_qwen_lora_report(model, qwen_plan, args.output_dir)
     model.gradient_checkpointing_enable()
     model.enable_input_require_grads()
     model.config.use_cache = False

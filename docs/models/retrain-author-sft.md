@@ -76,3 +76,42 @@ python scripts/retrain_author_sft.py \
 
 这是区别于作者实际 collator 行为的 **Qwen 适配修正版**，不冒称严格作者复现。
 代码修正不会修复已有权重，也未证明 EOS 掩码是重复生成的唯一原因；须用后续受控训练和推理比较验证。
+
+## 可选：Qwen3.5 架构适配版
+
+启动器和三个独立训练入口增加 `--qwen_adapted`，启用策略 `qwen35_language_projections_v1`。
+该模式自动开启 `--preserve_eos`（含单个结尾 EOS 规范化），但不修改提示词、示例、全序列损失范围、
+学习率、rank/alpha、epochs、batch、长度或验证集。仅回答计损失仍未启用，以免同时改变损失和覆盖范围。
+不开新开关时保持旧模块选择行为，不改原始作者文件、旧 adapter 或 DPO 入口。
+
+覆盖按实际语言分支的完整路径和 config 中每层类型逐一校验：
+
+| 部分 | 目标投影 |
+| --- | --- |
+| full_attention / self_attn | q_proj、k_proj、v_proj、o_proj |
+| linear_attention / linear_attn | in_proj_qkv、in_proj_z、in_proj_a、in_proj_b、out_proj |
+| 每层 MLP | gate_proj、up_proj、down_proj |
+
+仅支持当前拆分投影的 dense Qwen3.5 架构；其他架构、未知/融合投影布局、缺少任何预期投影、
+实际层数不符或语言分支不唯一均直接拒绝，不能把“发现任意一个模块”当作适配成功。
+目标用锚定完整路径的正则传给 PEFT，不以尾部名称跨分支匹配；视觉分支、embedding、输出头均排除。
+注入后要求实际 LoRA 模块集合与计划完全相同，各目标 A/B 可训练且无额外可训练底座参数。
+
+```bash
+python scripts/retrain_author_sft.py \
+  --repo-root /path/to/ParamAgent \
+  --run-dir /path/to/new/qwen-adapted-run --qwen_adapted
+```
+
+上述命令仍仅预检，明确需要训练时再加 `--train`。正式训练在首次更新前校验并保存
+`adapters/{domain}/qwen_lora_coverage.json`，含每层完整路径、目标正则、实际注入数和可训练参数量。
+manifest、training_source、status 及最终 verification 区分适配模式；重载验证重新计算架构计划并核对
+保存报告、adapter 配置和实际注入。不支持此新模式续训旧 checkpoint，独立入口要求全新输出目录，
+默认输出名也与 author-sft 分离。当前版本要求新训练，不支持 checkpoint resume。
+
+2026-10-24 在服务器实际环境中，仅使用原版 2B 配置构造 meta 空模型并执行真实 PEFT 注入，
+检查到 24 层（18 linear / 6 full）、186 个投影、67,276,800 个可训练参数，且所有参数仍为 meta。
+同时确认 Linear4bit 是受支持的 Linear 子类。此验证未加载实际权重、未做量化模型前后向或 GPU 训练，
+不证明任务收益或显存预算；该方案属于可审计的 Qwen 扩展覆盖，不宣称唯一正确或最优。
+
+测试：`python -m unittest discover -s tests -p 'test_qwen_sft.py' -v`。

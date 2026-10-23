@@ -81,6 +81,8 @@ class RetrainAuthorSFTTests(unittest.TestCase):
             original = sft.training_command(Path("/new/run"), domain, Path("/original/2B"))
             revised = sft.training_command(Path("/new/run"), domain, Path("/original/2B"), preserve_eos=True)
             self.assertEqual(revised, original + ["--preserve_eos"])
+            adapted = sft.training_command(Path("/new/run"), domain, Path("/original/2B"), qwen_adapted=True)
+            self.assertEqual(adapted, original + ["--preserve_eos", "--qwen_adapted"])
 
     def test_audit_and_training_share_terminal_eos_normalization(self):
         class CountingTokenizer(Tokenizer):
@@ -132,13 +134,13 @@ class RetrainAuthorSFTTests(unittest.TestCase):
                 with patch.object(sys, "argv", command), patch.object(sft, "preflight") as preflight:
                     sft.main()
                 preflight.assert_called_once_with(Path(directory).resolve(), run_dir.resolve(),
-                                                   preserve_eos=preserve_eos)
+                                                   preserve_eos=preserve_eos, qwen_adapted=False)
                 status = json.loads((run_dir / "status.json").read_text())
                 self.assertEqual(status["state"], "preflight_complete")
                 self.assertEqual(status["preserve_eos"], preserve_eos)
 
     def test_preflight_records_same_loss_mode_in_manifest_commands_and_samples(self):
-        for preserve_eos in (False, True):
+        for preserve_eos, qwen_adapted in ((False, False), (True, False), (True, True)):
             with tempfile.TemporaryDirectory() as directory:
                 repo = Path(directory)
                 self.base_fixture(repo)
@@ -163,25 +165,45 @@ class RetrainAuthorSFTTests(unittest.TestCase):
                 with patch.dict(sys.modules, dependencies), patch.object(sft, "load_training_module", modules.get), \
                         patch.object(sft.inspect, "signature", return_value=SimpleNamespace(parameters=required)), \
                         patch.object(sft.importlib.metadata, "version", return_value="test"):
-                    sft.preflight(repo, run_dir, preserve_eos=preserve_eos)
+                    sft.preflight(repo, run_dir, preserve_eos=False if qwen_adapted else preserve_eos,
+                                  qwen_adapted=qwen_adapted)
                 manifest = json.loads((run_dir / "manifest.json").read_text())
                 self.assertEqual(manifest["loss"], "full_sequence_padding_only_masked" if preserve_eos
                                  else "full_sequence_pad_eos_masked")
                 self.assertEqual(manifest["preserve_eos"], preserve_eos)
+                self.assertEqual(manifest["qwen_adapted"], qwen_adapted)
+                self.assertEqual(manifest["lora_policy"], "qwen35_language_projections_v1" if qwen_adapted
+                                 else "legacy_candidates")
                 for domain in sft.DOMAINS:
                     record = json.loads((run_dir / domain / "training_source.json").read_text())
                     sample = json.loads((run_dir / domain / "prompt_sample.json").read_text())
                     self.assertEqual(record["loss"], manifest["loss"])
                     self.assertEqual(record["preserve_eos"], preserve_eos)
                     self.assertEqual("--preserve_eos" in record["command"], preserve_eos)
+                    self.assertEqual("--qwen_adapted" in record["command"], qwen_adapted)
+                    self.assertEqual(record["lora_policy"], manifest["lora_policy"])
                     self.assertEqual(sample["labels"][3], 0 if preserve_eos else -100)
 
+    def test_qwen_launcher_enables_eos_and_records_mode_without_training(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "qwen-run"
+            command = ["retrain", "--repo-root", directory, "--run-dir", str(run_dir), "--qwen_adapted"]
+            with patch.object(sys, "argv", command), patch.object(sft, "preflight") as preflight:
+                sft.main()
+            preflight.assert_called_once_with(Path(directory).resolve(), run_dir.resolve(),
+                                               preserve_eos=True, qwen_adapted=True)
+            status = json.loads((run_dir / "status.json").read_text())
+            self.assertEqual(status["state"], "preflight_complete")
+            self.assertTrue(status["qwen_adapted"])
+            self.assertTrue(status["preserve_eos"])
+
     def test_worker_uses_recorded_training_flag_instead_of_losing_it_in_subprocess(self):
-        for preserve_eos in (False, True):
+        for preserve_eos, qwen_adapted in ((False, False), (True, False), (True, True)):
             with tempfile.TemporaryDirectory() as directory:
                 run_dir = Path(directory)
                 (run_dir / "qa").mkdir()
-                command = sft.training_command(run_dir, "qa", Path("/base"), preserve_eos=preserve_eos)
+                command = sft.training_command(run_dir, "qa", Path("/base"), preserve_eos=preserve_eos,
+                                               qwen_adapted=qwen_adapted)
                 (run_dir / "qa/training_source.json").write_text(json.dumps({"command": command}))
                 captured = []
                 module = SimpleNamespace(main=lambda: captured.append(sys.argv[:]))
