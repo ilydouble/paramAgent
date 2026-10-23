@@ -8,12 +8,15 @@ from pathlib import Path
 from run_parammem_pilot import read_rows, stage_results, qa_score
 
 
-def summarize(root, expected_tasks=10):
+def summarize(root, expected_tasks=10, methods=("qwen", "parammem", "parammem-dpo")):
     if expected_tasks <= 0:
         raise ValueError("Expected task count must be positive")
+    if ("qwen" not in methods or len(methods) < 2 or len(set(methods)) != len(methods)
+            or set(methods) - {"qwen", "parammem", "parammem-dpo"}):
+        raise ValueError("Select distinct known methods including qwen and at least one guided method")
     groups, tasks = [], []
     for domain in ("code", "math", "qa"):
-        for method in ("qwen", "parammem", "parammem-dpo"):
+        for method in methods:
             directory = root / "results" / domain / method
             if not (directory / "completed.json").exists():
                 raise RuntimeError(f"Run has not completed: {domain}/{method}")
@@ -69,27 +72,41 @@ def summarize(root, expected_tasks=10):
                               if (directory / "cache-origin.json").exists() else {}),
                            **({"final_mean_f1": sum(t["final_f1"] for t in subset)/len(subset)} if domain == "qa" else {})})
     pairs = []
+    comparisons = []
     for domain in ("code", "math", "qa"):
         by_method = {m: {t["task_id"]: t for t in tasks if t["domain"] == domain and t["method"] == m}
-                     for m in ("qwen", "parammem", "parammem-dpo")}
+                     for m in methods}
         if any(set(v) != set(by_method["qwen"]) for v in by_method.values()):
             raise RuntimeError("Methods used different task IDs")
-        for control in ("qwen", "parammem"):
+        for method in methods:
+            if method == "qwen":
+                continue
+            for stage in ("first_attempt", "stage1", "final"):
+                comparisons.append({"domain": domain, "method": method, "control": "qwen", "stage": stage,
+                                    "improved": [key for key, task in by_method[method].items()
+                                                 if task[stage] and not by_method["qwen"][key][stage]],
+                                    "regressed": [key for key, task in by_method[method].items()
+                                                  if not task[stage] and by_method["qwen"][key][stage]]})
+        if "parammem-dpo" not in methods:
+            continue
+        for control in (method for method in ("qwen", "parammem") if method in methods):
             for stage in ("first_attempt", "stage1", "final"):
                 improved = [i for i, t in by_method["parammem-dpo"].items() if t[stage] and not by_method[control][i][stage]]
                 regressed = [i for i, t in by_method["parammem-dpo"].items() if not t[stage] and by_method[control][i][stage]]
                 pairs.append({"domain": domain, "control": control, "stage": stage,
                               "dpo_improved": improved, "dpo_regressed": regressed})
     return {"protocol": f"oracle-feedback implementation diagnostic; {expected_tasks} frozen tasks per domain",
-            "groups": groups, "tasks": tasks, "dpo_pairs": pairs}
+            "groups": groups, "tasks": tasks, "dpo_pairs": pairs, "paired_comparisons": comparisons}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", type=Path)
     parser.add_argument("--expected-tasks", type=int, default=10)
+    parser.add_argument("--methods", nargs="+", choices=("qwen", "parammem", "parammem-dpo"),
+                        default=("qwen", "parammem", "parammem-dpo"))
     args = parser.parse_args()
-    result = summarize(args.root, args.expected_tasks)
+    result = summarize(args.root, args.expected_tasks, args.methods)
     output = args.root / "summary.json"
     output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     for row in result["groups"]:

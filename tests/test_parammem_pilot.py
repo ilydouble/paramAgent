@@ -2,6 +2,7 @@ import importlib.util
 import ast
 import io
 import json
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -16,6 +17,65 @@ spec.loader.exec_module(pilot)
 
 
 class PilotTests(unittest.TestCase):
+    def test_new_sft_loads_original_multimodal_model_and_selected_adapter(self):
+        base, adapter = Path("/original/2B"), Path("/new/sft")
+        causal, multimodal, tokenizer, quantization, peft_model = (Mock() for _ in range(5))
+        modules = {"torch": SimpleNamespace(bfloat16="bf16"),
+                   "transformers": SimpleNamespace(AutoModelForCausalLM=causal, AutoModelForMultimodalLM=multimodal,
+                                                   AutoTokenizer=tokenizer, BitsAndBytesConfig=quantization),
+                   "peft": SimpleNamespace(PeftModel=peft_model)}
+        args = SimpleNamespace(domain="code", method="parammem", model_root=Path("/legacy"))
+        memory = pilot.LocalMemory(args, None, [])
+        with patch.dict(sys.modules, modules), patch.object(pilot, "resolve_sft_adapter", return_value=(base, adapter, "hash")):
+            memory.load()
+        causal.from_pretrained.assert_not_called()
+        self.assertEqual(multimodal.from_pretrained.call_args.args[0], base)
+        peft_model.from_pretrained.assert_called_once_with(multimodal.from_pretrained.return_value, adapter)
+        tokenizer.from_pretrained.assert_called_once_with(base)
+        self.assertIs(memory.model, peft_model.from_pretrained.return_value)
+
+    def test_new_sft_requires_complete_override_and_exact_base_and_hash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            base, adapter = root / "original", root / "new-sft"
+            base.mkdir()
+            adapter.mkdir()
+            (base / "model.safetensors").write_bytes(b"original weights")
+            (adapter / "adapter_model.safetensors").write_bytes(b"new SFT weights")
+            config = adapter / "adapter_config.json"
+            config.write_text(json.dumps({"base_model_name_or_path": str(base)}))
+            args = SimpleNamespace(method="parammem", model_root=root, sft_base_path=base,
+                                   sft_adapter_path=adapter, expected_sft_sha256=pilot.file_digest(adapter / "adapter_model.safetensors"))
+            self.assertEqual(pilot.resolve_sft_adapter(args), (base.resolve(), adapter.resolve(), args.expected_sft_sha256))
+            self.assertEqual(pilot.model_weight_hashes(base), {"model.safetensors": pilot.file_digest(base / "model.safetensors")})
+            for method in ("qwen", "parammem-dpo"):
+                args.method = method
+                with self.assertRaisesRegex(ValueError, "require method parammem"):
+                    pilot.resolve_sft_adapter(args)
+            args.method = "parammem"
+            config.write_text(json.dumps({"base_model_name_or_path": str(root / "wrong-base")}))
+            with self.assertRaisesRegex(ValueError, "base mismatch"):
+                pilot.resolve_sft_adapter(args)
+            config.write_text(json.dumps({"base_model_name_or_path": str(base)}))
+            args.expected_sft_sha256 = "incorrect"
+            with self.assertRaisesRegex(ValueError, "SHA256"):
+                pilot.resolve_sft_adapter(args)
+            args.expected_sft_sha256 = None
+            with self.assertRaisesRegex(ValueError, "supplied together"):
+                pilot.resolve_sft_adapter(args)
+            self.assertEqual(pilot.resolve_sft_adapter(SimpleNamespace()), (None, None, None))
+
+    def test_sharded_original_model_hashes_do_not_allow_path_traversal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            (base / "shard.safetensors").write_bytes(b"weights")
+            index = base / "model.safetensors.index.json"
+            index.write_text(json.dumps({"weight_map": {"a": "shard.safetensors", "b": "shard.safetensors"}}))
+            self.assertEqual(pilot.model_weight_hashes(base), {"shard.safetensors": pilot.file_digest(base / "shard.safetensors")})
+            index.write_text(json.dumps({"weight_map": {"a": "../outside"}}))
+            with self.assertRaisesRegex(ValueError, "weight inventory"):
+                pilot.model_weight_hashes(base)
+
     def test_runtime_errors_cannot_be_reported_as_wrong_answers_or_complete(self):
         with tempfile.TemporaryDirectory() as directory:
             rows = [{"task_id": "failed", "is_solved": None, "runtime_error": "ValueError: unresolved"}]

@@ -31,6 +31,13 @@ class SummaryTests(unittest.TestCase):
             self.assertEqual((row["stage1"], row["final"]), (9, 10))
             pair = next(r for r in result["dpo_pairs"] if r["domain"] == "code" and r["stage"] == "final" and r["control"] == "parammem")
             self.assertEqual(pair["dpo_improved"], ["0"])
+            two_arm = summary.summarize(root, methods=("qwen", "parammem"))
+            self.assertEqual(len(two_arm["groups"]), 6)
+            self.assertEqual(two_arm["dpo_pairs"], [])
+            self.assertTrue(all(pair["method"] == "parammem" for pair in two_arm["paired_comparisons"]))
+            for methods in (("parammem",), ("qwen", "qwen"), ("qwen", "unknown")):
+                with self.assertRaises(ValueError):
+                    summary.summarize(root, methods=methods)
             (root / "code-qwen.log").write_text("Error in item 0: invalid execution")
             with self.assertRaisesRegex(RuntimeError, "Runner errors"):
                 summary.summarize(root)

@@ -85,6 +85,12 @@ Actor通过同一vLLM服务的`/tokenize`按实际chat template精确计数；�
 复测新训练的DPO时，同时提供`--dpo-adapter-path /absolute/new/adapter`和
 `--expected-dpo-sha256 <已验证的adapter_model.safetensors哈希>`，替代默认历史登记项。
 入口核对文件哈希和精确SFT底座路径，身份文件记录实际adapter路径；其余两组不接受该覆盖。
+测试新重训且未合并的 SFT 时，`--method parammem` 同时提供
+`--sft-base-path /absolute/original/Qwen3.5-2B`、`--sft-adapter-path /absolute/new/sft`、
+`--expected-sft-sha256 <adapter_model.safetensors哈希>`。入口拒绝不完整覆盖、
+底座声明不符或哈希不符，且不允许用于 Qwen/DPO 组。按训练重载验证使用原版多模态模型类，
+在 NF4 原版底座上加载新 SFT adapter，不合并、不修改权重。身份记录原版所有权重分片和 adapter 哈希；
+未提供覆盖时仍使用旧登记模型，不能仅更新实验标题而忘记切换权重。
 每次调用追加并 fsync，完整重放可从日志恢复相同请求及采样序号的输出。
 恢复时使用新输出目录，仅以旧 `calls.jsonl` 初始化缓存，不复用阶段结果；禁止原地续跑，
 避免原 runner 跳过阶段后无法还原采样次数和记忆库。
@@ -103,5 +109,8 @@ Actor通过同一vLLM服务的`/tokenize`按实际chat template精确计数；�
 九组全部完成并下载后，运行 `python scripts/summarize_parammem_pilot.py /path/to/experiment`，
 生成 `summary.json`。它按题配对首次作答、首阶段和最终结果，统计截断与生成token，
 检查缺失/重复题目、未重试失败题及 runner 捕获的异常；适用于早期快照。
+仅对比 Qwen 与 SFT 的六组实验时，汇总增加 `--methods qwen parammem`；
+仍要求三域同题、完整两阶段和无未决/异常，输出 `paired_comparisons` 记录逐题改善/退化，
+不要求虚构 DPO 组或将旧 DPO 结果混入新实验。默认九组汇总保持不变。
 
 离线测试：`python -m unittest discover -s tests -p 'test_parammem_pilot*.py' -v`。

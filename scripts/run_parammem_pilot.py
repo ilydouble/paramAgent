@@ -84,6 +84,38 @@ def resolve_dpo_adapter(args):
     return adapter, actual
 
 
+def resolve_sft_adapter(args):
+    values = [getattr(args, name, None) for name in
+              ("sft_base_path", "sft_adapter_path", "expected_sft_sha256")]
+    if not any(values):
+        return None, None, None
+    if not all(values):
+        raise ValueError("Explicit SFT base, adapter and expected SHA256 must be supplied together")
+    if args.method != "parammem":
+        raise ValueError("Explicit SFT weights require method parammem, without a DPO adapter")
+    base, adapter = (Path(value).resolve(strict=True) for value in values[:2])
+    if (base / "adapter_config.json").exists():
+        raise ValueError("SFT base must be a complete model, not an adapter")
+    actual = file_digest(adapter / "adapter_model.safetensors")
+    if actual != values[2]:
+        raise ValueError("SFT weights differ from expected checkpoint SHA256")
+    config = json.loads((adapter / "adapter_config.json").read_text())
+    declared = Path(config["base_model_name_or_path"])
+    if not declared.is_absolute():
+        declared = args.model_root / declared
+    if declared.resolve() != base:
+        raise ValueError("SFT adapter/original base mismatch")
+    return base, adapter, actual
+
+
+def model_weight_hashes(base):
+    index = base / "model.safetensors.index.json"
+    names = sorted(set(json.loads(index.read_text())["weight_map"].values())) if index.exists() else ["model.safetensors"]
+    if not names or any(Path(name).name != name for name in names):
+        raise ValueError("Invalid model weight inventory")
+    return {name: file_digest(base / name) for name in names}
+
+
 def stage_results(directory):
     """The legacy results.jsonl stops at Stage 1; Stage 2 has its own file."""
     directory = Path(directory)
@@ -310,13 +342,17 @@ class LocalMemory:
         if self.model is not None:
             return
         import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+        from transformers import AutoModelForCausalLM, AutoModelForMultimodalLM, AutoTokenizer, BitsAndBytesConfig
         from peft import PeftModel
-        base = self.args.model_root / "models" / BASES[self.args.domain]
+        explicit_base, sft_adapter, _ = resolve_sft_adapter(self.args)
+        base = explicit_base or self.args.model_root / "models" / BASES[self.args.domain]
         quant = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4",
             bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_use_double_quant=True)
-        self.model = AutoModelForCausalLM.from_pretrained(base, quantization_config=quant,
-                                                       device_map={"": 0}, dtype=torch.bfloat16)
+        model_class = AutoModelForMultimodalLM if sft_adapter else AutoModelForCausalLM
+        self.model = model_class.from_pretrained(base, quantization_config=quant,
+                                                device_map={"": 0}, dtype=torch.bfloat16)
+        if sft_adapter:
+            self.model = PeftModel.from_pretrained(self.model, sft_adapter)
         if self.args.method == "parammem-dpo":
             adapter, _ = resolve_dpo_adapter(self.args)
             self.model = PeftModel.from_pretrained(self.model, adapter)
@@ -429,6 +465,7 @@ def configure_generation_budget(args):
 def run(args):
     configure_generation_budget(args)
     adapter, adapter_sha256 = resolve_dpo_adapter(args)
+    sft_base, sft_adapter, sft_sha256 = resolve_sft_adapter(args)
     args.output.mkdir(parents=True, exist_ok=True)
     if (args.output / "results.jsonl").exists():
         raise ValueError("Use a fresh output directory; seed only calls.jsonl for a full deterministic replay")
@@ -449,8 +486,13 @@ def run(args):
         "actor_context_tokens": args.actor_context_tokens, "math_answer_tokens": args.math_answer_tokens,
         "context_reserve_tokens": args.context_reserve_tokens, "actor_token_counting": "vllm_tokenize"}
     if args.method != "qwen":
-        base = args.model_root / "models" / BASES[args.domain]
-        identity["base_weights_sha256"] = file_digest(base / "model.safetensors")
+        base = sft_base or args.model_root / "models" / BASES[args.domain]
+        if sft_adapter:
+            identity.update(sft_base_path=str(base), sft_adapter_path=str(sft_adapter),
+                            sft_adapter_sha256=sft_sha256, sft_base_weights_sha256=model_weight_hashes(base),
+                            sft_loading="NF4 original model plus unmerged SFT adapter; no DPO")
+        else:
+            identity["base_weights_sha256"] = file_digest(base / "model.safetensors")
         if args.method == "parammem-dpo":
             identity["adapter_sha256"] = adapter_sha256
             identity["adapter_path"] = str(adapter.resolve())
@@ -512,6 +554,9 @@ def main():
     parser.add_argument("--model-root", type=Path, required=True)
     parser.add_argument("--dpo-adapter-path", type=Path)
     parser.add_argument("--expected-dpo-sha256")
+    parser.add_argument("--sft-base-path", type=Path)
+    parser.add_argument("--sft-adapter-path", type=Path)
+    parser.add_argument("--expected-sft-sha256")
     parser.add_argument("--embedding-path", type=Path, required=True)
     parser.add_argument("--actor-url", default="http://127.0.0.1:8000/v1")
     parser.add_argument("--actor-context-tokens", type=int, default=16384)
