@@ -79,7 +79,9 @@ python scripts/retrain_author_sft.py \
 
 ## 可选：Qwen3.5 架构适配版
 
-启动器和三个独立训练入口增加 `--qwen_adapted`，启用策略 `qwen35_language_projections_v1`。
+启动器和三个独立训练入口支持 `--qwen_adapted`，默认仅注意力，策略为 `qwen35_attention_projections_v1`。
+只有额外显式加入 `--qwen_include_mlp` 才启用注意力＋MLP对照，策略为 `qwen35_language_projections_v1`。
+MLP 开关必须与 `--qwen_adapted` 一起使用；两种模式的开关及策略均记录于运行清单和覆盖报告。
 该模式自动开启 `--preserve_eos`（含单个结尾 EOS 规范化），但不修改提示词、示例、全序列损失范围、
 学习率、rank/alpha、epochs、batch、长度或验证集。仅回答计损失仍未启用，以免同时改变损失和覆盖范围。
 不开新开关时保持旧模块选择行为，不改原始作者文件、旧 adapter 或 DPO 入口。
@@ -90,7 +92,7 @@ python scripts/retrain_author_sft.py \
 | --- | --- |
 | full_attention / self_attn | q_proj、k_proj、v_proj、o_proj |
 | linear_attention / linear_attn | in_proj_qkv、in_proj_z、in_proj_a、in_proj_b、out_proj |
-| 每层 MLP | gate_proj、up_proj、down_proj |
+| 每层 MLP（仅显式对照开启） | gate_proj、up_proj、down_proj |
 
 仅支持当前拆分投影的 dense Qwen3.5 架构；其他架构、未知/融合投影布局、缺少任何预期投影、
 实际层数不符或语言分支不唯一均直接拒绝，不能把“发现任意一个模块”当作适配成功。
@@ -103,14 +105,22 @@ python scripts/retrain_author_sft.py \
   --run-dir /path/to/new/qwen-adapted-run --qwen_adapted
 ```
 
+该主配置不向 MLP 注入 LoRA，MLP 原始权重仍冻结；线性注意力自身的门控投影不是 MLP，仍按上表覆盖。
+需要注意力＋MLP 对照时，使用另一个全新 `--run-dir`，并额外加入 `--qwen_include_mlp`。
+独立入口的两种默认输出名也分开，不能用同一个目录混用覆盖范围。
+同日再次用真实配置和 PEFT 做 meta 检查：仅注意力为 114 个投影、29,528,064 个可训练参数，
+MLP adapter 数为 0；显式对照仍为 186 个投影、67,276,800 个参数，其中 72 个 MLP adapter。
+可训练参数减少不代表总训练耗时同比减少，训练速度和效果仍需实际验证。
+
 上述命令仍仅预检，明确需要训练时再加 `--train`。正式训练在首次更新前校验并保存
 `adapters/{domain}/qwen_lora_coverage.json`，含每层完整路径、目标正则、实际注入数和可训练参数量。
 manifest、training_source、status 及最终 verification 区分适配模式；重载验证重新计算架构计划并核对
 保存报告、adapter 配置和实际注入。不支持此新模式续训旧 checkpoint，独立入口要求全新输出目录，
 默认输出名也与 author-sft 分离。当前版本要求新训练，不支持 checkpoint resume。
 
-2026-10-24 在服务器实际环境中，仅使用原版 2B 配置构造 meta 空模型并执行真实 PEFT 注入，
-检查到 24 层（18 linear / 6 full）、186 个投影、67,276,800 个可训练参数，且所有参数仍为 meta。
+2026-10-24 初版含 MLP 的服务器 meta 检查得到 24 层（18 linear / 6 full）、186 个投影、
+67,276,800 个可训练参数；该结果对应显式注意力＋MLP对照，不是当前默认主配置。
+仅使用原版 2B 配置构造 meta 空模型并执行真实 PEFT 注入，所有参数仍为 meta。
 同时确认 Linear4bit 是受支持的 Linear 子类。此验证未加载实际权重、未做量化模型前后向或 GPU 训练，
 不证明任务收益或显存预算；该方案属于可审计的 Qwen 扩展覆盖，不宣称唯一正确或最优。
 

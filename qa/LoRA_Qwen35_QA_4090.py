@@ -73,6 +73,8 @@ def parse_args() -> argparse.Namespace:
                         help="Qwen revision: supervise real EOS tokens; mask only appended padding.")
     parser.add_argument("--qwen_adapted", action="store_true",
                         help="Fresh-run Qwen3.5 language projection coverage, including EOS supervision.")
+    parser.add_argument("--qwen_include_mlp", action="store_true",
+                        help="Optional attention-plus-MLP comparison; requires --qwen_adapted.")
     parser.add_argument(
         "--dynamic_padding",
         action="store_true",
@@ -91,10 +93,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val_ratio", type=float, default=0.15)
     parser.add_argument("--seed", type=int, default=1)
     args = parser.parse_args()
+    if args.qwen_include_mlp and not args.qwen_adapted:
+        parser.error("--qwen_include_mlp requires --qwen_adapted")
     if args.qwen_adapted:
         args.preserve_eos = True
         if args.output_dir == parser.get_default("output_dir"):
-            args.output_dir = args.output_dir.replace("-author-sft", "-qwen-adapted-sft")
+            suffix = "-qwen-adapted-mlp-sft" if args.qwen_include_mlp else "-qwen-adapted-sft"
+            args.output_dir = args.output_dir.replace("-author-sft", suffix)
         if args.resume_from_checkpoint or Path(args.output_dir).exists():
             parser.error("--qwen_adapted requires a new output directory and no resume checkpoint")
     return args
@@ -185,7 +190,7 @@ def main() -> None:
         device_map={"": 0},
     )
     model = prepare_model_for_kbit_training(model)
-    qwen_plan = qwen_lora_plan(model) if args.qwen_adapted else None
+    qwen_plan = qwen_lora_plan(model, include_mlp=args.qwen_include_mlp) if args.qwen_adapted else None
     targets = qwen_plan["target_regex"] if qwen_plan else select_lora_modules(model)
     print(f"LoRA target modules: {targets}")
     model = get_peft_model(

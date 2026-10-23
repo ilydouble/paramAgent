@@ -5,6 +5,7 @@ import re
 
 
 POLICY = "qwen35_language_projections_v1"
+ATTENTION_POLICY = "qwen35_attention_projections_v1"
 PROJECTIONS = {
     "full_attention": ("self_attn", {"q_proj", "k_proj", "v_proj", "o_proj"}),
     "linear_attention": ("linear_attn", {"in_proj_qkv", "in_proj_z", "in_proj_a", "in_proj_b", "out_proj"}),
@@ -12,7 +13,7 @@ PROJECTIONS = {
 MLP = {"gate_proj", "up_proj", "down_proj"}
 
 
-def qwen_lora_plan(model):
+def qwen_lora_plan(model, include_mlp=False):
     import torch
     config = model.config
     text_config = getattr(config, "text_config", config)
@@ -39,7 +40,8 @@ def qwen_lora_plan(model):
             raise ValueError(f"Unsupported Qwen layer type: {layer_type}")
         block, projections = PROJECTIONS[layer_type]
         expected = [f"{root}.layers.{index}.{block}.{leaf}" for leaf in sorted(projections)]
-        expected += [f"{root}.layers.{index}.mlp.{leaf}" for leaf in sorted(MLP)]
+        if include_mlp:
+            expected += [f"{root}.layers.{index}.mlp.{leaf}" for leaf in sorted(MLP)]
         for name in expected:
             module = modules.get(name)
             linear = module.get_base_layer() if hasattr(module, "get_base_layer") else module
@@ -47,7 +49,8 @@ def qwen_lora_plan(model):
                 raise ValueError(f"Missing or unsupported Qwen linear projection: {name}")
         targets.extend(expected)
         coverage.append({"layer": index, "type": layer_type, "projections": expected})
-    return {"policy": POLICY, "language_root": root, "targets": sorted(targets), "coverage": coverage,
+    return {"policy": POLICY if include_mlp else ATTENTION_POLICY, "include_mlp": include_mlp,
+            "language_root": root, "targets": sorted(targets), "coverage": coverage,
             "target_regex": "^(?:" + "|".join(re.escape(name) for name in sorted(targets)) + ")$"}
 
 
